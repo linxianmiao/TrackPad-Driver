@@ -1,34 +1,93 @@
-# Magic Trackpad 2 Precision Touchpad driver for Windows 11, signed by Microsoft, no more hacks required 🎉
+# MagicPad Native PTP Driver
 
-This is a fork of the excellent [imbushuo](https://github.com/imbushuo/mac-precision-touchpad) driver for the Magic Trackpad 2. **It supports Bluetooth**. Compared to imbushuo or to the official 2021 Apple driver, this project adds:
+将 Apple Magic Trackpad 2 / USB‑C Magic Trackpad 的原始多点触控报告转换为
+Windows 11 原生 Precision Touchpad（PTP）报告。Windows 接收的是标准 PTP 触点，
+滚动、缩放、三指/四指手势仍由系统手势栈处理。
 
-- support for USB-C Magic Trackpad 2
-- battery level reading
-- haptic feedback control
-- various options for controlling pointer precision
-- a control panel:
+> 当前状态：开发预览。macOS 模拟器和共享转换核心可直接运行；KMDF 驱动需要在
+> Windows 11 x64 + WDK 环境中构建，并在真实 USB‑C Magic Trackpad 上完成硬件门禁
+> 后才能日常使用。仓库不包含可公开分发的 Microsoft 签名。
 
-![Control Panel](https://raw.githubusercontent.com/vitoplantamura/MagicTrackpad2ForWindows/master/assets/ControlPanel.png)
+## 已实现
 
-The previous version of this project used a hack to install itself in the DriverStore and couldn't support Bluetooth. At the beginning of this year, I decided to purchase an EV certificate to properly sign the driver: I paid 485 euros for it, including taxes that I have no way of recovering as an individual (btw, only organizations can request an EV certificate). I was tired of seeing people resorting to the wildest hacks to get the MT2 to work via Bluetooth 😀 (you can get a glimpse of this in the issues of this repo). **Windows drivers signing requirements and costs are unfair to open-source developers**.
+- Bluetooth 优先：支持 Apple Bluetooth VID `0x004c`，PID `0x0265` / `0x0324`
+- USB‑C Magic Trackpad PID `0x0324` 的现有 USB 路径
+- 原生 PTP HID 描述符与 5 触点、50 字节 Input Report
+- Apple `0x31` Report 的显式小端解析，不依赖 C 位域布局
+- 稳定的 5 触点准入、Palm Confidence、Near Finger、按压锁定与 Scan Time
+- 驱动和 macOS 模拟器共用同一份无浮点、无动态分配的 C17 转换核心
+- 本地 Web 模拟器：手动拖拽、手势预设、时间线和 trace 导入/导出
+- WPP/ETW 元数据诊断；默认不记录原始触点字节
 
-## Installation on Windows 11
+## 在 macOS 运行可视化模拟器
 
-0) Uninstall any previous versions of this driver, imbushuo or `official 2021 Apple driver`. Personally I use [DriverStore Explorer](https://github.com/lostindark/DriverStoreExplorer) for that, alternatively you can use Windows Device Manager. Also, **it's especially important to uninstall `Magic Utilities` and `Trackpad++`** before continuing with the installation!
+需要 Node.js 22 和系统 C 编译器：
 
-1) Download the zip file of this project from the [Releases](https://github.com/vitoplantamura/MagicTrackpad2ForWindows/releases) of this repo and unzip it.
+```bash
+make -C core test
+cd simulator
+npm ci
+npm run dev
+```
 
-2) Select your architecture: AMD64 or ARM64. Right-click on the INF file and click "Install".
+打开 [http://127.0.0.1:4173](http://127.0.0.1:4173)。页面通过本地进程调用
+`core/build/amtptp-cli`，因此显示的 PTP 字节与驱动使用同一转换实现，不是前端伪造结果。
 
-### Note about Windows 10
+生产模式：
 
-Windows 10 AMD64 is supported through [this workaround](https://github.com/vitoplantamura/MagicTrackpad2ForWindows/issues/25#issuecomment-4084774884).
+```bash
+cd simulator
+npm run build
+npm run start
+```
 
-Windows 10 ARM64 is not supported.
+## Windows 开发构建
 
-## Credits
+推荐环境：
 
-- [This excellent PR](https://github.com/imbushuo/mac-precision-touchpad/pull/533) of [1Revenger1](https://github.com/1Revenger1) to the imbushuo repo, which fixes the "near field fingers" problem, cleans up the code, and removes the QueryPerformanceCounter call in the interrupt function.
-- The haptic feedback control messages sent by the driver to the MT2 in this project are based on the excellent reverse engineering work of [dos1](https://github.com/dos1) ([here](https://github.com/mwyborski/Linux-Magic-Trackpad-2-Driver/issues/28#issuecomment-451625504)).
-- My long-time friends at [Landlogic IT](https://landlogic.it/), who took care of the grueling process of gaining access to Microsoft's Hardware Dashboard and who take care of signing the driver packages for me.
-- @ordens, Taylor Sharp, @Wikiwix, @nagromc, @danspel, 乔​泽昱, Purasu Oy, Patrick Adler for their contribution to the purchase of the EV certificate ([more info here](https://github.com/vitoplantamura/MagicTrackpad2ForWindows/issues/31)).
+- Windows 11 x64
+- Visual Studio 2022（Desktop development with C++）
+- Windows Driver Kit
+- NuGet CLI
+
+恢复依赖并构建：
+
+```powershell
+nuget restore .\AmtPtpDeviceUsbUm\MagicTrackpad2PtpDevice.vcxproj -PackagesDirectory .\packages
+nuget restore .\AmtPtpHidFilter\AmtPtpHidFilter.vcxproj -PackagesDirectory .\packages
+msbuild .\AmtPtpDeviceUsbUm\MagicTrackpad2PtpDevice.vcxproj /p:Configuration=Release /p:Platform=x64 /p:ApiValidator_Enable=false
+msbuild .\AmtPtpHidFilter\AmtPtpHidFilter.vcxproj /p:Configuration=Release /p:Platform=x64 /p:ApiValidator_Enable=false
+```
+
+生成自签名测试包：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\New-TestSignedPackage.ps1
+```
+
+安装、回滚、Test Mode 和 HVCI 检查见
+[Windows 测试指南](docs/windows-testing.md)。
+
+## 驱动签名与证书
+
+最终用户使用 Magic Utilities 一类正式发行驱动时，不需要自己购买证书；发行商必须为
+其驱动完成 Windows 认可的签名流程。本项目开发阶段使用自签名测试证书和 Windows
+Test Mode。要公开分发，需要组织身份、代码签名凭据和 Microsoft Hardware Dev Center
+签名流程；面向零售用户应走 HLK/WHCP，当前 attestation signing 只面向微软定义的测试
+场景，单靠仓库中的自签名证书不够。
+
+## 架构与可观测性
+
+- [驱动架构](docs/architecture.md)
+- [Trace 文件格式](docs/trace-format.md)
+- [Windows 测试与诊断](docs/windows-testing.md)
+- [两轮对抗性方案审查](docs/adversarial-review.md)
+
+## 来源与许可证
+
+本分支固定基于
+[`vitoplantamura/MagicTrackpad2ForWindows@68b31c4`](https://github.com/vitoplantamura/MagicTrackpad2ForWindows/commit/68b31c466f4e2ec8905cf7be44580b01705650f3)，
+后者源自 `imbushuo/mac-precision-touchpad`。本项目不会复制或逆向 Magic Utilities 的
+专有实现，只实现公开 HID/PTP 行为和独立转换逻辑。
+
+项目继承并遵循 [GPLv2](LICENSE)。

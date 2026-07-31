@@ -125,18 +125,16 @@ PtpFilterInputParseMT2Report(
 )
 {
 	NTSTATUS status;
-
 	WDFREQUEST ptpRequest;
 	WDFMEMORY  ptpRequestMemory;
-	PTP_REPORT ptpOutputReport;
 	PDRIVER_CONTEXT driverContext;
 	WDFDRIVER driver;
-
-	const TRACKPAD_REPORT_TYPE5* mt_report;
-	const TRACKPAD_FINGER_TYPE5* f;
-	SIZE_T raw_n;
-	INT x, y = 0;
-	UINT32 timestamp;
+	amtptp_raw_frame rawFrame;
+	amtptp_frame ptpFrame;
+	amtptp_options options;
+	amtptp_status coreStatus;
+	UCHAR ptpBytes[AMTPTP_PTP_REPORT_SIZE];
+	SIZE_T ptpLength = 0;
 	
 	driver = WdfGetDriver();
 	if (driver == NULL)
@@ -146,143 +144,113 @@ PtpFilterInputParseMT2Report(
 	}
 	driverContext = PtpFilterDriverGetContext(driver);
 
-	mt_report = (const TRACKPAD_REPORT_TYPE5*)Buffer;
-
-	// Pre-flight check 1: the response size should be sane
-	if (BufferLength < sizeof(TRACKPAD_REPORT_TYPE5) ||
-		(BufferLength - sizeof(TRACKPAD_REPORT_TYPE5)) % sizeof(TRACKPAD_FINGER_TYPE5) != 0)
-	{
-		TraceEvents(TRACE_LEVEL_INFORMATION, TRACE_INPUT, "%!FUNC! Malformed input received. Length = %llu. Attempt to reconfigure the device.", BufferLength);
+	coreStatus = amtptp_decode_mt2(Buffer, BufferLength, &rawFrame);
+	if (coreStatus != AMTPTP_OK) {
+		TraceEvents(
+			TRACE_LEVEL_INFORMATION,
+			TRACE_INPUT,
+			"%!FUNC! Malformed input received. Length = %llu, core status = %d. Attempt to reconfigure the device.",
+			BufferLength,
+			(INT)coreStatus);
 		WdfTimerStart(DeviceContext->HidTransportRecoveryTimer, WDF_REL_TIMEOUT_IN_SEC(3));
 		return;
 	}
 
-	// Retrieve PTP output 
-	status = WdfIoQueueRetrieveNextRequest(DeviceContext->HidReadQueue, &ptpRequest);
-	if (!NT_SUCCESS(status))
-	{
-		TraceEvents(TRACE_LEVEL_ERROR, TRACE_INPUT, "%!FUNC! WdfIoQueueRetrieveNextRequest failed with %!STATUS!", status);
+	amtptp_default_options(&options);
+	options.x_min = (int16_t)DeviceContext->X.min;
+	options.y_min = (int16_t)DeviceContext->Y.min;
+	options.x_max = (uint16_t)(DeviceContext->X.max - DeviceContext->X.min);
+	options.y_max = (uint16_t)(DeviceContext->Y.max - DeviceContext->Y.min);
+	options.stop_pressure = driverContext->StopPressure;
+	options.stop_size = driverContext->StopSize;
+	options.button_disabled = driverContext->ButtonDisabled ? 1u : 0u;
+	options.ignore_button_finger =
+		driverContext->IgnoreButtonFinger ? 1u : 0u;
+	options.ignore_near_fingers =
+		driverContext->IgnoreNearFingers ? 1u : 0u;
+	options.palm_rejection = driverContext->PalmRejection ? 1u : 0u;
+
+	coreStatus = amtptp_convert_ptp(
+		&DeviceContext->CoreSession,
+		&options,
+		&rawFrame,
+		&ptpFrame);
+	if (coreStatus != AMTPTP_OK) {
+		TraceEvents(
+			TRACE_LEVEL_ERROR,
+			TRACE_INPUT,
+			"%!FUNC! Core conversion failed with status %d",
+			(INT)coreStatus);
 		return;
 	}
 
-	timestamp = (mt_report->TimestampHigh << 5) | mt_report->TimestampLow;
-
-	// Report header
-	ptpOutputReport.ReportID = REPORTID_MULTITOUCH;
-	ptpOutputReport.IsButtonClicked = (UCHAR) mt_report->Button;
-	ptpOutputReport.ScanTime = (USHORT) timestamp * 10;
-
-	if (driverContext->ButtonDisabled)
-		ptpOutputReport.IsButtonClicked = 0;
-
-	// Report required content
-	// Touch
-	raw_n = (BufferLength - sizeof(TRACKPAD_REPORT_TYPE5)) / sizeof(TRACKPAD_FINGER_TYPE5);
-	if (raw_n >= PTP_MAX_CONTACT_POINTS) raw_n = PTP_MAX_CONTACT_POINTS;
-	ptpOutputReport.ContactCount = (UCHAR) raw_n;
-	for (size_t i = 0; i < raw_n; i++) {
-		f = &mt_report->Fingers[i];
-
-		// Sign extend
-		x = (SHORT)(f->AbsoluteX << 3) >> 3;
-		y = -(SHORT)(f->AbsoluteY << 3) >> 3;
-		x = (x - DeviceContext->X.min) > 0 ? (x - DeviceContext->X.min) : 0;
-		y = (y - DeviceContext->Y.min) > 0 ? (y - DeviceContext->Y.min) : 0;
-
-		ptpOutputReport.Contacts[i].ContactID = f->Id;
-
-		// 0x1 = Transition between states
-		// 0x2 = Floating finger
-		// 0x4 = Contact/Valid
-		// I've gotten 0x6 if I press on the trackpad and then keep my finger close
-		// Note: These values come from my MBP9,2. These also are valid on my MT2
-		ptpOutputReport.Contacts[i].TipSwitch = (f->State & 0x4) && (driverContext->IgnoreNearFingers == FALSE ? TRUE : !(f->State & 0x2));
-
-		// The Microsoft spec says reject any input larger than 25mm. This is not ideal
-		// for Magic Trackpad 2 - so we raised the threshold a bit higher.
-		// Or maybe I used the wrong unit? IDK
-		//CHAR valid_size = ((SHORT)(f->TouchMinor) << 1) < 345 && ((SHORT)(f->TouchMinor) << 1) < 345;
-
-		// 1 = thumb, 2 = index, etc etc
-		// 6 = palm on MT2, 7 = palm on my MBP9,2 (why are these different?)
-		//CHAR valid_finger = f->Finger != 6;
-		ptpOutputReport.Contacts[i].Confidence = driverContext->PalmRejection == FALSE ? TRUE : f->Finger != 6; // valid_size && valid_finger;
-
-#define UINT32_SET_MSB(v) ((UINT32)v | ((UINT32)1 << 31))
-
-		PPTP_REPORT_AUX prev_contact = NULL;
-		if (
-			DeviceContext->PrevPtpReportAux1.Id != UINT32_SET_MSB(f->Id) &&
-			DeviceContext->PrevPtpReportAux2.Id != UINT32_SET_MSB(f->Id) &&
-			(driverContext->IgnoreButtonFinger == FALSE ? TRUE : (!DeviceContext->PrevIsButtonClicked || !ptpOutputReport.IsButtonClicked)) &&
-			(driverContext->StopPressure == 0xffffffff ? TRUE : f->Pressure > driverContext->StopPressure) &&
-			(driverContext->StopSize == 0xffffffff ? TRUE : f->Size > driverContext->StopSize)
-		)
-		{
-			PPTP_REPORT_AUX contact;
-
-			if (DeviceContext->PrevPtpReportAux1.Id == f->Id)
-				contact = &DeviceContext->PrevPtpReportAux1;
-			else if (DeviceContext->PrevPtpReportAux2.Id == f->Id)
-				contact = &DeviceContext->PrevPtpReportAux2;
-			else if (!DeviceContext->PrevPtpReportAux1.TipSwitch)
-				contact = &DeviceContext->PrevPtpReportAux1;
-			else
-				contact = &DeviceContext->PrevPtpReportAux2;
-
-			contact->X = (USHORT)x;
-			contact->Y = (USHORT)y;
-			contact->Id = f->Id;
-			contact->TipSwitch = ptpOutputReport.Contacts[i].TipSwitch;
-		}
-		else // lock the pointer:
-		{
-			size_t j;
-			for (j = 0; j < 2; j++)
-			{
-				PPTP_REPORT_AUX contact = !j ? &DeviceContext->PrevPtpReportAux1 : &DeviceContext->PrevPtpReportAux2;
-
-				if (contact->Id == f->Id || contact->Id == UINT32_SET_MSB(f->Id))
-				{
-					contact->TipSwitch = ptpOutputReport.Contacts[i].TipSwitch;
-
-					if (contact->TipSwitch)
-					{
-						prev_contact = contact;
-						contact->Id = UINT32_SET_MSB(contact->Id);
-					}
-					else
-					{
-						contact->Id = (UINT32)-1;
-					}
-				}
-			}
-		}
-		ptpOutputReport.Contacts[i].X = prev_contact ? prev_contact->X : (USHORT)x;
-		ptpOutputReport.Contacts[i].Y = prev_contact ? prev_contact->Y : (USHORT)y;
-
-#undef UINT32_SET_MSB
+	if (!DeviceContext->PtpReportTouch) {
+		RtlZeroMemory(ptpFrame.contacts, sizeof(ptpFrame.contacts));
+		ptpFrame.contact_count = 0u;
 	}
-	
-	DeviceContext->PrevIsButtonClicked = ptpOutputReport.IsButtonClicked;
+	if (!DeviceContext->PtpReportButton) {
+		ptpFrame.button = 0u;
+	}
+
+	TraceEvents(
+		TRACE_LEVEL_VERBOSE,
+		TRACE_INPUT,
+		"%!FUNC! Converted contacts raw=%u ptp=%u scan=%u button=%u admitted=0x%04x suppressed=0x%04x",
+		(UINT32)rawFrame.contact_count,
+		(UINT32)ptpFrame.contact_count,
+		(UINT32)ptpFrame.scan_time,
+		(UINT32)ptpFrame.button,
+		(UINT32)DeviceContext->CoreSession.admitted_mask,
+		(UINT32)DeviceContext->CoreSession.suppressed_mask);
+
+	coreStatus = amtptp_serialize_ptp(
+		&ptpFrame,
+		ptpBytes,
+		sizeof(ptpBytes),
+		&ptpLength);
+	if (coreStatus != AMTPTP_OK || ptpLength != AMTPTP_PTP_REPORT_SIZE) {
+		TraceEvents(
+			TRACE_LEVEL_ERROR,
+			TRACE_INPUT,
+			"%!FUNC! Core serialization failed with status %d",
+			(INT)coreStatus);
+		return;
+	}
+
+	// Retrieve a pending HID read only after the source report is validated.
+	status = WdfIoQueueRetrieveNextRequest(
+		DeviceContext->HidReadQueue,
+		&ptpRequest);
+	if (!NT_SUCCESS(status)) {
+		TraceEvents(
+			TRACE_LEVEL_ERROR,
+			TRACE_INPUT,
+			"%!FUNC! WdfIoQueueRetrieveNextRequest failed with %!STATUS!",
+			status);
+		return;
+	}
 
 	status = WdfRequestRetrieveOutputMemory(ptpRequest, &ptpRequestMemory);
-	if (!NT_SUCCESS(status))
-	{
+	if (!NT_SUCCESS(status)) {
 		TraceEvents(TRACE_LEVEL_ERROR, TRACE_INPUT, "%!FUNC! WdfRequestRetrieveOutputBuffer failed with %!STATUS!", status);
+		WdfRequestComplete(ptpRequest, status);
 		return;
 	}
 
-	status = WdfMemoryCopyFromBuffer(ptpRequestMemory, 0, (PVOID)&ptpOutputReport, sizeof(PTP_REPORT));
-	if (!NT_SUCCESS(status))
-	{
+	status = WdfMemoryCopyFromBuffer(
+		ptpRequestMemory,
+		0,
+		ptpBytes,
+		ptpLength);
+	if (!NT_SUCCESS(status)) {
 		TraceEvents(TRACE_LEVEL_ERROR, TRACE_INPUT, "%!FUNC! WdfMemoryCopyFromBuffer failed with %!STATUS!", status);
+		WdfRequestComplete(ptpRequest, status);
 		WdfDeviceSetFailed(DeviceContext->Device, WdfDeviceFailedAttemptRestart);
 		return;
 	}
 
-	WdfRequestSetInformation(ptpRequest, sizeof(PTP_REPORT));
-	WdfRequestComplete(ptpRequest, status);
+	WdfRequestSetInformation(ptpRequest, ptpLength);
+	WdfRequestComplete(ptpRequest, STATUS_SUCCESS);
 }
 
 static

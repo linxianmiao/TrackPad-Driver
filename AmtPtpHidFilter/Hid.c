@@ -306,6 +306,7 @@ PtpFilterSetHidFeatures(
 		{
 			TraceEvents(TRACE_LEVEL_INFORMATION, TRACE_HID, "%!FUNC! Report REPORTID_REPORTMODE requested Mouse Input");
 			deviceContext->PtpInputOn = FALSE;
+			amtptp_reset_session(&deviceContext->CoreSession);
 			break;
 		}
 		case PTP_COLLECTION_WINDOWS:
@@ -313,6 +314,7 @@ PtpFilterSetHidFeatures(
 
 			TraceEvents(TRACE_LEVEL_INFORMATION, TRACE_HID, "%!FUNC! Report REPORTID_REPORTMODE requested Windows PTP Input");
 			deviceContext->PtpInputOn = TRUE;
+			amtptp_reset_session(&deviceContext->CoreSession);
 			break;
 		}
 		}
@@ -325,6 +327,9 @@ PtpFilterSetHidFeatures(
 		TraceEvents(TRACE_LEVEL_INFORMATION, TRACE_HID, "%!FUNC! Report REPORTID_FUNCSWITCH is requested");
 
 		PPTP_DEVICE_SELECTIVE_REPORT_MODE_REPORT InputSelection = (PPTP_DEVICE_SELECTIVE_REPORT_MODE_REPORT)hidPacket->reportBuffer;
+		if (deviceContext->PtpReportTouch != InputSelection->SurfaceReport) {
+			amtptp_reset_session(&deviceContext->CoreSession);
+		}
 		deviceContext->PtpReportButton = InputSelection->ButtonReport;
 		deviceContext->PtpReportTouch = InputSelection->SurfaceReport;
 

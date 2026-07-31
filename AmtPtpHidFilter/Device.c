@@ -78,9 +78,8 @@ PtpFilterCreateDevice(
         goto exit;
     }
 	
-	// Initialize pointer lock vars
-	deviceContext->PrevPtpReportAux1.Id = (UINT32)-1;
-	deviceContext->PrevPtpReportAux2.Id = (UINT32)-1;
+	// Initialize the per-device shared conversion state.
+    amtptp_reset_session(&deviceContext->CoreSession);
 
     // Initialize read buffer
     status = WdfLookasideListCreate(WDF_NO_OBJECT_ATTRIBUTES, REPORT_BUFFER_SIZE,
@@ -116,6 +115,7 @@ PtpFilterCreateDevice(
     deviceContext->ProductID = 0;
     deviceContext->VersionNumber = 0;
     deviceContext->DeviceConfigured = FALSE;
+    amtptp_reset_session(&deviceContext->CoreSession);
 
     // Initialize IO queue
     status = PtpFilterIoQueueInitialize(device);
@@ -203,6 +203,7 @@ PtpFilterDeviceD0Exit(
 
     // Reset device state
     deviceContext->DeviceConfigured = FALSE;
+    amtptp_reset_session(&deviceContext->CoreSession);
 
     // Cancelling all outstanding requests
     while (NT_SUCCESS(status)) {

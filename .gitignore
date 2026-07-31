@@ -6,3 +6,11 @@ AmtPtpHidFilter/build/
 intermediate/
 build/result/
 /packages
+core/build/
+simulator/node_modules/
+simulator/dist/
+simulator/playwright-report/
+simulator/test-results/
+simulator/*.tsbuildinfo
+simulator/vite.config.js
+simulator/vite.config.d.ts

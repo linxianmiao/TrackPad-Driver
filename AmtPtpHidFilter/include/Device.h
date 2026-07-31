@@ -23,13 +23,6 @@ typedef struct _BCM5974_PARAM {
     int max;			/* device maximum reading */
 } BCM5974_PARAM, *PBCM5974_PARAM;
 
-// for locking the pointer:
-typedef struct _PTP_REPORT_AUX {
-	USHORT      X, Y;
-	UINT32      Id;
-	UCHAR		TipSwitch;
-} PTP_REPORT_AUX, * PPTP_REPORT_AUX;
-
 // Device Context
 typedef struct _DEVICE_CONTEXT
 {
@@ -61,10 +54,7 @@ typedef struct _DEVICE_CONTEXT
     BOOLEAN         PtpInputOn;
     BOOLEAN         PtpReportTouch;
     BOOLEAN         PtpReportButton;
-	
-	// for locking the pointer
-	PTP_REPORT_AUX  PrevPtpReportAux1, PrevPtpReportAux2;
-	UCHAR           PrevIsButtonClicked;
+    amtptp_session  CoreSession;
 	
 } DEVICE_CONTEXT, *PDEVICE_CONTEXT;
 

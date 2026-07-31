@@ -43,6 +43,12 @@
     <ClCompile Include="Hid.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="ControlDevice.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\core\src\amtptp_core.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="include\Driver.h">
@@ -86,8 +92,17 @@
     <ClInclude Include="include\HidDevice.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="include\ControlDevice.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\core\include\amtptp_core.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
+    <None Include="AmtPtpHidFilter.wprp">
+      <Filter>Resource Files</Filter>
+    </None>
   </ItemGroup>
 </Project>

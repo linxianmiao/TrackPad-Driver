@@ -1,10 +1,41 @@
-on: workflow_dispatch
+name: Validate native PTP driver
+
+on:
+  pull_request:
+  push:
+    branches:
+      - "feature/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
+  portable-core:
+    name: Core tests and simulator
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: simulator/package-lock.json
+
+      - name: Test shared C core
+        run: make -C core test
+
+      - name: Build simulator
+        working-directory: simulator
+        run: |
+          npm ci
+          npm run build
+
   build:
     name: Build Driver Package and Control Panel
-    permissions:
-      contents: write
     runs-on: windows-latest
     steps:
 

@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<WindowsPerformanceRecorder
+  Version="1.0"
+  Author="MagicPad Driver contributors"
+  Copyright="MagicPad Driver contributors"
+  Company="MagicPad Driver contributors">
+  <Profiles>
+    <EventCollector
+      Id="EventCollector_AmtPtpHidFilter"
+      Name="AmtPtpHidFilter">
+      <BufferSize Value="64" />
+      <Buffers Value="4" />
+    </EventCollector>
+    <EventProvider
+      Id="EventProvider_AmtPtpHidFilter"
+      Name="EEB34803-F3EC-4BB1-97CE-B42405D7F3C2" />
+    <Profile
+      Id="AmtPtpHidFilter.Verbose.File"
+      Name="AmtPtpHidFilter"
+      Description="MagicPad Bluetooth filter diagnostics"
+      LoggingMode="File"
+      DetailLevel="Verbose">
+      <Collectors>
+        <EventCollectorId Value="EventCollector_AmtPtpHidFilter">
+          <EventProviders>
+            <EventProviderId Value="EventProvider_AmtPtpHidFilter" />
+          </EventProviders>
+        </EventCollectorId>
+      </Collectors>
+    </Profile>
+    <Profile
+      Id="AmtPtpHidFilter.Light.File"
+      Name="AmtPtpHidFilter"
+      Description="MagicPad Bluetooth filter diagnostics"
+      Base="AmtPtpHidFilter.Verbose.File"
+      LoggingMode="File"
+      DetailLevel="Light" />
+  </Profiles>
+</WindowsPerformanceRecorder>

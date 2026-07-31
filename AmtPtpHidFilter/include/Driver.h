@@ -8,6 +8,7 @@
 #include <wdfusb.h>
 #include <initguid.h>
 #include <hidport.h>
+#include <amtptp_core.h>
 
 #include "Trace.h"
 
