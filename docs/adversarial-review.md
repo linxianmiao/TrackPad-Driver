@@ -1,38 +1,43 @@
-# 两轮对抗性方案审查
+# 对抗性方案审查与架构更正
 
-实现前使用 Claude CLI（Opus / high）进行了两轮独立审查。
+## 前两轮结论
 
-## 第一轮：红队质疑
+实现前两轮审查主要检查 PTP descriptor/feature/input 是否自洽、bitfield 与 packing、
+Scan Time、Contact ID 生命周期、第 6 指、休眠重连、HVCI、GPL 边界，以及 simulator
+与驱动是否共用同一转换实现。
 
-重点攻击：
+当时根据现有代码能够拦截 HID IOCTL 并返回替换 descriptor，暂时保留了上游
+descriptor-replacement lower filter。这只能证明代码路径存在，不能证明它使用了受支持的
+Windows 内核扩展点。
 
-- 是否错误地把 VHF 当成现有 descriptor replacement 的必需条件
-- PTP Report Descriptor、Feature Report 与 50-byte Input Report 是否自洽
-- bitfield / packing、Scan Time、Contact ID 生命周期和第 6 指行为
-- 休眠、取消、Bluetooth 重连、测试签名与 HVCI
-- GPL 派生、Magic Utilities 专有边界和发布证书
-- macOS simulator 是否可能与真实驱动出现双实现漂移
+## 第三轮：内核接口级复审
 
-该轮提出的“必须改成 VHF”和“测试签名必然与 HVCI 不兼容”被标记为待证伪假设，
-没有直接纳入实现。
+对 `Detour.c` 和 `include/Hac.h` 的逐项复审发现发布阻断问题：
 
-## 第二轮：证据复核
+- 通过私有结构解释另一个驱动的 `DriverExtension`；
+- 获取 lower device 后，改写其共享 `DRIVER_OBJECT->MajorFunction` 表；
+- 没有可靠的 per-device 作用域、恢复顺序和并发协议；
+- 同一 transport driver 下的非目标设备也可能被影响。
 
-第二轮以固定上游源码为证据重新检查：
+即使把指针交换改成原子操作并在卸载时恢复，也仍然是在依赖另一个驱动的私有布局和全局
+派发表，不会因此成为受支持的 filter 设计。因此更正此前结论：生产版本必须迁移到 VHF，
+现有 detour 不得进入签名或可安装包。
 
-- `Queue.c` 已拦截 `IOCTL_HID_GET_REPORT_DESCRIPTOR` / `SET_FEATURE`
-- `Hid.c` 已向 `0x0265` / `0x0324` 返回 PTP 描述符和 Feature Reports
-- INF 将 Bluetooth `Col01` 绑定 lower filter、`Col02` 绑定 Null Device
-- 因此 MVP 保留 descriptor-replacement KMDF lower filter，不引入 VHF
-- HVCI 是否接受测试包是硬件门禁，不在没有 Windows 机器时作结论
-- simulator 直接调用同一 native C core，不另写 WASM/TypeScript 转换器
+微软 VHF 文档明确允许 source driver 是 KMDF filter/function，并要求 `vhf.sys` 位于其
+下方；物理 HID 连续输入应使用已打开 collection 上的 `IRP_MJ_READ`。证据：
 
-## 结论
+- [Virtual HID Framework](https://learn.microsoft.com/en-us/windows-hardware/drivers/hid/virtual-hid-framework--vhf-)
+- [Opening HID collections](https://learn.microsoft.com/en-us/windows-hardware/drivers/hid/opening-hid-collections)
+- [Obtaining HID reports](https://learn.microsoft.com/en-us/windows-hardware/drivers/hid/obtaining-hid-reports)
+- [Microsoft Firefly filter sample](https://github.com/microsoft/Windows-driver-samples/tree/main/hid/firefly)
 
-结论是“有条件推进”：
+## 当前结论
 
-- 架构可行；
-- 共享核心、显式序列化、稳定五指生命周期和测试签名隔离必须先完成；
-- Windows x64 编译、真实 PID `0x0324` Bluetooth、睡眠/重连、HVCI 和卸载回滚仍是
-  发布阻断门禁；
-- 未通过这些门禁前只能称为开发预览，不能称为生产可用驱动。
+项目仍是“有条件推进”，但条件已收紧：
+
+1. 保留已经通过可移植测试的共享转换核心和 simulator。
+2. 先用只读 PnP/HID caps 工具建立真实 `004c:0324` Bluetooth 基线。
+3. 完成透明 physical READ + VHF virtual PTP 原型，并删除 detour/private layout 依赖。
+4. 在原生 Windows 11 x64 上验证 filter 顺序、功能、睡眠/重连、HVCI、Driver Verifier、
+   卸载和回滚。
+5. 所有门禁通过前，只能称为 bring-up 源码，不能提供可安装驱动或宣称正式支持。

@@ -35,13 +35,14 @@
 
 1. PnP Hardware IDs、Compatible IDs、父子关系、驱动栈和设备接口。
 2. 原始 HID capabilities、Report IDs 和实际最大报告长度。
-3. 多点触控模式切换前后的 `0x31` 报告。
-4. `0x90` 电量报告的长度、百分比和充电状态字段。
-5. Bluetooth 关闭/开启、超距恢复和删除后重新配对。
-6. 睡眠/唤醒 20 次；重连 20 次；持续输入 2 小时。
-7. HVCI、Driver Verifier、安装、升级、卸载和回滚。
+3. 透明 physical READ + VHF virtual PTP 原型；物理 descriptor 不得被替换。
+4. 多点触控模式切换前后的 `0x31` 报告。
+5. `0x90` 电量报告的长度、百分比和充电状态字段。
+6. Bluetooth 关闭/开启、超距恢复和删除后重新配对。
+7. 睡眠/唤醒 20 次；重连 20 次；持续输入 2 小时。
+8. HVCI、Driver Verifier、安装、升级、卸载和回滚。
 
-在第 1–4 项完成前，`0324` 不应宣传为正式支持。
+在上述项目全部完成前，`0324` 不应宣传为正式支持，也不应提供可安装包。
 
 ## 公开协议证据
 
@@ -67,3 +68,5 @@ Bluetooth version `0x0314`，并将 USB-C PID 纳入 Trackpad 2 报告族。该�
 原始触控 trace 包含坐标，可能泄露用户动作。仓库只接受最小复现片段；长时间 trace、
 Bluetooth 地址、Container ID、设备实例后缀和机器名称不得提交。使用
 `scripts/windows/Collect-MagicTrackpadDiagnostics.ps1` 时，默认输出会隐藏这些标识。
+若同目录存在 `MagicPadHidProbe.exe`，脚本还会采集 descriptor-visible HID caps；探针不读取
+或写入 HID report，也不采集序列号。
