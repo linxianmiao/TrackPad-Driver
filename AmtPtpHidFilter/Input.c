@@ -258,8 +258,8 @@ PtpFilterInputParseMT2Report(
 	SIZE_T ptpLength = 0;
 	BOOLEAN reportTouch;
 	BOOLEAN reportButton;
-	uint16_t admittedMask;
-	uint16_t suppressedMask;
+	amtptp_u16 admittedMask;
+	amtptp_u16 suppressedMask;
 	
 	driver = WdfGetDriver();
 	if (driver == NULL)
@@ -281,10 +281,10 @@ PtpFilterInputParseMT2Report(
 	}
 
 	amtptp_default_options(&options);
-	options.x_min = (int16_t)DeviceContext->X.min;
-	options.y_min = (int16_t)DeviceContext->Y.min;
-	options.x_max = (uint16_t)(DeviceContext->X.max - DeviceContext->X.min);
-	options.y_max = (uint16_t)(DeviceContext->Y.max - DeviceContext->Y.min);
+	options.x_min = (amtptp_i16)DeviceContext->X.min;
+	options.y_min = (amtptp_i16)DeviceContext->Y.min;
+	options.x_max = (amtptp_u16)(DeviceContext->X.max - DeviceContext->X.min);
+	options.y_max = (amtptp_u16)(DeviceContext->Y.max - DeviceContext->Y.min);
 	options.stop_pressure = driverContext->StopPressure;
 	options.stop_size = driverContext->StopSize;
 	options.button_disabled = driverContext->ButtonDisabled ? 1u : 0u;

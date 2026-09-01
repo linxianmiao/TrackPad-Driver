@@ -1,8 +1,33 @@
 #ifndef AMTPTP_CORE_H
 #define AMTPTP_CORE_H
 
+#if defined(_KERNEL_MODE)
+#include <ntdef.h>
+typedef SIZE_T amtptp_size;
+#else
 #include <stddef.h>
 #include <stdint.h>
+typedef size_t amtptp_size;
+#endif
+
+/*
+ * Keep the shared decoder independent from the user-mode CRT.  Including
+ * <stdint.h> in a KMDF translation unit mixes the Visual C++ CRT headers with
+ * the WDK kernel CRT headers.  The supported targets use 8-bit bytes, 16-bit
+ * shorts and 32-bit ints; the compile-time checks below make that contract
+ * explicit without exporting platform-specific Windows types.
+ */
+typedef signed short amtptp_i16;
+typedef signed int amtptp_i32;
+typedef unsigned char amtptp_u8;
+typedef unsigned short amtptp_u16;
+typedef unsigned int amtptp_u32;
+
+typedef char amtptp_i16_must_be_2[(sizeof(amtptp_i16) == 2u) ? 1 : -1];
+typedef char amtptp_i32_must_be_4[(sizeof(amtptp_i32) == 4u) ? 1 : -1];
+typedef char amtptp_u8_must_be_1[(sizeof(amtptp_u8) == 1u) ? 1 : -1];
+typedef char amtptp_u16_must_be_2[(sizeof(amtptp_u16) == 2u) ? 1 : -1];
+typedef char amtptp_u32_must_be_4[(sizeof(amtptp_u32) == 4u) ? 1 : -1];
 
 #ifdef __cplusplus
 extern "C" {
@@ -26,65 +51,65 @@ typedef enum amtptp_status {
 } amtptp_status;
 
 typedef struct amtptp_raw_contact {
-    int16_t absolute_x;
-    int16_t absolute_y;
-    uint8_t finger;
-    uint8_t state;
-    uint8_t touch_major;
-    uint8_t touch_minor;
-    uint8_t size;
-    uint8_t pressure;
-    uint8_t id;
-    uint8_t orientation;
+    amtptp_i16 absolute_x;
+    amtptp_i16 absolute_y;
+    amtptp_u8 finger;
+    amtptp_u8 state;
+    amtptp_u8 touch_major;
+    amtptp_u8 touch_minor;
+    amtptp_u8 size;
+    amtptp_u8 pressure;
+    amtptp_u8 id;
+    amtptp_u8 orientation;
 } amtptp_raw_contact;
 
 typedef struct amtptp_raw_frame {
-    uint32_t timestamp_ms;
-    uint8_t button;
-    uint8_t contact_count;
+    amtptp_u32 timestamp_ms;
+    amtptp_u8 button;
+    amtptp_u8 contact_count;
     amtptp_raw_contact contacts[AMTPTP_MAX_RAW_CONTACTS];
 } amtptp_raw_frame;
 
 typedef struct amtptp_contact {
-    uint32_t id;
-    uint16_t x;
-    uint16_t y;
-    uint8_t confidence;
-    uint8_t tip_switch;
+    amtptp_u32 id;
+    amtptp_u16 x;
+    amtptp_u16 y;
+    amtptp_u8 confidence;
+    amtptp_u8 tip_switch;
 } amtptp_contact;
 
 typedef struct amtptp_frame {
-    uint16_t scan_time;
-    uint8_t button;
-    uint8_t contact_count;
+    amtptp_u16 scan_time;
+    amtptp_u8 button;
+    amtptp_u8 contact_count;
     amtptp_contact contacts[AMTPTP_MAX_PTP_CONTACTS];
 } amtptp_frame;
 
 typedef struct amtptp_options {
-    int16_t x_min;
-    int16_t y_min;
-    uint16_t x_max;
-    uint16_t y_max;
-    uint32_t stop_pressure;
-    uint32_t stop_size;
-    uint8_t button_disabled;
-    uint8_t ignore_button_finger;
-    uint8_t ignore_near_fingers;
-    uint8_t palm_rejection;
+    amtptp_i16 x_min;
+    amtptp_i16 y_min;
+    amtptp_u16 x_max;
+    amtptp_u16 y_max;
+    amtptp_u32 stop_pressure;
+    amtptp_u32 stop_size;
+    amtptp_u8 button_disabled;
+    amtptp_u8 ignore_button_finger;
+    amtptp_u8 ignore_near_fingers;
+    amtptp_u8 palm_rejection;
 } amtptp_options;
 
 typedef struct amtptp_locked_contact {
-    uint32_t id;
-    uint16_t x;
-    uint16_t y;
-    uint8_t tip_switch;
-    uint8_t locked;
+    amtptp_u32 id;
+    amtptp_u16 x;
+    amtptp_u16 y;
+    amtptp_u8 tip_switch;
+    amtptp_u8 locked;
 } amtptp_locked_contact;
 
 typedef struct amtptp_session {
-    uint16_t admitted_mask;
-    uint16_t suppressed_mask;
-    uint8_t previous_button;
+    amtptp_u16 admitted_mask;
+    amtptp_u16 suppressed_mask;
+    amtptp_u8 previous_button;
     amtptp_locked_contact locked_contacts[2];
 } amtptp_session;
 
@@ -92,8 +117,8 @@ void amtptp_default_options(amtptp_options *options);
 void amtptp_reset_session(amtptp_session *session);
 
 amtptp_status amtptp_decode_mt2(
-    const uint8_t *input,
-    size_t input_length,
+    const amtptp_u8 *input,
+    amtptp_size input_length,
     amtptp_raw_frame *output);
 
 amtptp_status amtptp_convert_ptp(
@@ -104,9 +129,9 @@ amtptp_status amtptp_convert_ptp(
 
 amtptp_status amtptp_serialize_ptp(
     const amtptp_frame *input,
-    uint8_t *output,
-    size_t output_capacity,
-    size_t *output_length);
+    amtptp_u8 *output,
+    amtptp_size output_capacity,
+    amtptp_size *output_length);
 
 #ifdef __cplusplus
 }
