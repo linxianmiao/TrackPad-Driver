@@ -14,3 +14,6 @@ simulator/test-results/
 simulator/*.tsbuildinfo
 simulator/vite.config.js
 simulator/vite.config.d.ts
+magicpad-diagnostics-*/
+magicpad-diagnostics-*.zip
+magicpad-*.etl

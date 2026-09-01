@@ -78,6 +78,36 @@ signature。Attestation signing 当前只保留给指定测试场景，不用于
 7. Bluetooth 断开/重连 20 次
 8. 设备删除、重新配对、驱动卸载/回滚
 
+### 2024 USB-C Magic Trackpad Bluetooth bring-up
+
+在安装本项目驱动前后各运行一次只读采集脚本，以确认 `VID 004c / PID 0324` 的真实枚举、
+驱动栈和错误事件：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File `
+  .\scripts\windows\Collect-MagicTrackpadDiagnostics.ps1
+```
+
+安装测试驱动后，可附加 15 秒 WPP/ETW 元数据采集：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File `
+  .\scripts\windows\Collect-MagicTrackpadDiagnostics.ps1 `
+  -TraceSeconds 15
+```
+
+脚本不会切换设备模式、发送 Feature Report、重新配对或更改驱动。默认会隐藏机器名、
+用户名、Bluetooth 地址、Container ID 和设备实例后缀。生成的 zip 仍可能包含本机驱动
+清单和事件信息，上传前应人工检查。原始 `0x31` 坐标帧不由此脚本收集。
+脚本同时保存 `powercfg /a`；如果 VM 不支持 S3 或 Modern Standby，宿主机的
+“暂停虚拟机”不能作为 Windows guest 的睡眠/唤醒验收。
+
+运行脚本时还应确认 `processArchitecture` 为 `AMD64`。Windows ARM64 可以模拟
+x64 应用，但内核驱动必须与 OS 架构匹配，所以 ARM64 VM 不能验收 x64 KMDF
+二进制。参见 [Windows on Arm FAQ](https://learn.microsoft.com/en-us/windows/arm/faq)。
+
+当前目标和证据状态见 [支持矩阵](support-matrix.md)。
+
 ## 7. WPP/ETW 诊断
 
 仓库提供 `AmtPtpHidFilter\AmtPtpHidFilter.wprp`。管理员终端：

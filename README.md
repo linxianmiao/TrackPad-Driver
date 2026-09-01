@@ -10,7 +10,8 @@ Windows 11 原生 Precision Touchpad（PTP）报告。Windows 接收的是标准
 
 ## 已实现
 
-- Bluetooth 优先：支持 Apple Bluetooth VID `0x004c`，PID `0x0265` / `0x0324`
+- Bluetooth 优先：已声明 Apple Bluetooth VID `0x004c`，PID `0x0265` / `0x0324`；
+  `0x0324` 目前处于实机 bring-up
 - USB‑C Magic Trackpad PID `0x0324` 的现有 USB 路径
 - 原生 PTP HID 描述符与 5 触点、50 字节 Input Report
 - Apple `0x31` Report 的显式小端解析，不依赖 C 位域布局
@@ -79,6 +80,7 @@ Test Mode。要公开分发，需要组织身份、代码签名凭据和 Microso
 ## 架构与可观测性
 
 - [驱动架构](docs/architecture.md)
+- [设备支持矩阵](docs/support-matrix.md)
 - [Trace 文件格式](docs/trace-format.md)
 - [Windows 测试与诊断](docs/windows-testing.md)
 - [两轮对抗性方案审查](docs/adversarial-review.md)
