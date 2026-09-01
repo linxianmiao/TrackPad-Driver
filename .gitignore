@@ -3,8 +3,10 @@ bin/
 obj/
 AmtPtpDeviceUsbUm/build/
 AmtPtpHidFilter/build/
+tools/windows/MagicPadHidProbe/build/
 intermediate/
 build/result/
+/diagnostics/
 /packages
 core/build/
 simulator/node_modules/
@@ -14,3 +16,6 @@ simulator/test-results/
 simulator/*.tsbuildinfo
 simulator/vite.config.js
 simulator/vite.config.d.ts
+magicpad-diagnostics-*/
+magicpad-diagnostics-*.zip
+magicpad-*.etl

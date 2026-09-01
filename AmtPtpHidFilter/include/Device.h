@@ -45,9 +45,24 @@ typedef struct _DEVICE_CONTEXT
     BOOLEAN     IsHidIoDetourCompleted;
     WDFTIMER    HidTransportRecoveryTimer;
     WDFWORKITEM HidTransportRecoveryWorkItem;
+    WDFSPINLOCK TransportStateLock;
 
     // Device State
     BOOLEAN DeviceConfigured;
+    BOOLEAN InD0;
+    BOOLEAN HidIoTargetPurged;
+    ULONG   TransportGeneration;
+    ULONG   RecoveryGeneration;
+
+    // Lower HID reads are serialized through the transport work item.  The
+    // request handle is an identity token while the request is in flight; the
+    // request/completion path owns the object lifetime.
+    BOOLEAN    LowerReadInFlight;
+    WDFREQUEST LowerReadRequest;
+    ULONG      LowerReadGeneration;
+    BOOLEAN    TransportWorkPending;
+    BOOLEAN    TransportWorkItemRunning;
+    ULONG      TransportWorkGeneration;
 
     // PTP report specific
     LARGE_INTEGER   LastReportTime;
@@ -64,6 +79,7 @@ WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(DEVICE_CONTEXT, PtpFilterGetContext)
 typedef struct _WORKER_REQUEST_CONTEXT {
     PDEVICE_CONTEXT DeviceContext;
     WDFMEMORY RequestMemory;
+    ULONG Generation;
 } WORKER_REQUEST_CONTEXT, * PWORKER_REQUEST_CONTEXT;
 
 WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(WORKER_REQUEST_CONTEXT, WorkerRequestGetContext)
@@ -91,6 +107,13 @@ PtpFilterConfigureMultiTouch(
 VOID
 PtpFilterRecoveryTimerCallback(
     WDFTIMER Timer
+);
+
+BOOLEAN
+PtpFilterScheduleTransportRecovery(
+    _In_ PDEVICE_CONTEXT DeviceContext,
+    _In_ ULONG Generation,
+    _In_ ULONG DelaySeconds
 );
 
 NTSTATUS

@@ -7,6 +7,8 @@
 #pragma alloc_text (PAGE, PtpFilterCreateDevice)
 #endif
 
+#define PTP_HID_SYNC_TIMEOUT_MS 2000
+
 VOID
 PtpFilterEvtDeviceContextCleanup(
     _In_ WDFOBJECT DeviceObject
@@ -69,6 +71,18 @@ PtpFilterCreateDevice(
     deviceContext->WdmDeviceObject = WdfDeviceWdmGetDeviceObject(device);
     if (deviceContext->WdmDeviceObject == NULL) {
         TraceEvents(TRACE_LEVEL_ERROR, TRACE_DEVICE, "WdfDeviceWdmGetDeviceObject failed");
+        status = STATUS_UNSUCCESSFUL;
+        goto exit;
+    }
+
+    // Transport state is shared by queue, work-item, timer, completion, and
+    // power callbacks.  These callbacks are deliberately not automatically
+    // serialized because D0Exit synchronously flushes the timer/work item.
+    WDF_OBJECT_ATTRIBUTES_INIT(&deviceAttributes);
+    deviceAttributes.ParentObject = device;
+    status = WdfSpinLockCreate(&deviceAttributes, &deviceContext->TransportStateLock);
+    if (!NT_SUCCESS(status)) {
+        TraceEvents(TRACE_LEVEL_ERROR, TRACE_DEVICE, "WdfSpinLockCreate failed: %!STATUS!", status);
         goto exit;
     }
 
@@ -82,32 +96,38 @@ PtpFilterCreateDevice(
     amtptp_reset_session(&deviceContext->CoreSession);
 
     // Initialize read buffer
-    status = WdfLookasideListCreate(WDF_NO_OBJECT_ATTRIBUTES, REPORT_BUFFER_SIZE,
+    WDF_OBJECT_ATTRIBUTES_INIT(&deviceAttributes);
+    deviceAttributes.ParentObject = device;
+    status = WdfLookasideListCreate(&deviceAttributes, REPORT_BUFFER_SIZE,
         NonPagedPoolNx, WDF_NO_OBJECT_ATTRIBUTES, PTP_LIST_POOL_TAG,
         &deviceContext->HidReadBufferLookaside
     );
     if (!NT_SUCCESS(status)) {
         TraceEvents(TRACE_LEVEL_ERROR, TRACE_DEVICE, "WdfLookasideListCreate failed: %!STATUS!", status);
+        goto exit;
     }
 
     // Initialize HID recovery timer
     WDF_TIMER_CONFIG_INIT(&timerConfig, PtpFilterRecoveryTimerCallback);
-    timerConfig.AutomaticSerialization = TRUE;
+    timerConfig.AutomaticSerialization = FALSE;
     WDF_OBJECT_ATTRIBUTES_INIT(&deviceAttributes);
     deviceAttributes.ParentObject = device;
     deviceAttributes.ExecutionLevel = WdfExecutionLevelPassive;
     status = WdfTimerCreate(&timerConfig, &deviceAttributes, &deviceContext->HidTransportRecoveryTimer);
     if (!NT_SUCCESS(status)) {
         TraceEvents(TRACE_LEVEL_ERROR, TRACE_DEVICE, "WdfTimerCreate failed: %!STATUS!", status);
+        goto exit;
     }
 
     // Initialize HID recovery workitem
     WDF_WORKITEM_CONFIG_INIT(&workitemConfig, PtpFilterWorkItemCallback);
+    workitemConfig.AutomaticSerialization = FALSE;
     WDF_OBJECT_ATTRIBUTES_INIT(&deviceAttributes);
     deviceAttributes.ParentObject = device;
     status = WdfWorkItemCreate(&workitemConfig, &deviceAttributes, &deviceContext->HidTransportRecoveryWorkItem);
     if (!NT_SUCCESS(status)) {
         TraceEvents(TRACE_LEVEL_ERROR, TRACE_DEVICE, "HidTransportRecoveryWorkItem failed: %!STATUS!", status);
+        goto exit;
     }
 
     // Set initial state
@@ -115,12 +135,23 @@ PtpFilterCreateDevice(
     deviceContext->ProductID = 0;
     deviceContext->VersionNumber = 0;
     deviceContext->DeviceConfigured = FALSE;
+    deviceContext->InD0 = FALSE;
+    deviceContext->HidIoTargetPurged = FALSE;
+    deviceContext->TransportGeneration = 0;
+    deviceContext->RecoveryGeneration = 0;
+    deviceContext->LowerReadInFlight = FALSE;
+    deviceContext->LowerReadRequest = NULL;
+    deviceContext->LowerReadGeneration = 0;
+    deviceContext->TransportWorkPending = FALSE;
+    deviceContext->TransportWorkItemRunning = FALSE;
+    deviceContext->TransportWorkGeneration = 0;
     amtptp_reset_session(&deviceContext->CoreSession);
 
     // Initialize IO queue
     status = PtpFilterIoQueueInitialize(device);
     if (!NT_SUCCESS(status)) {
         TraceEvents(TRACE_LEVEL_ERROR, TRACE_DEVICE, "PtpFilterIoQueueInitialize failed: %!STATUS!", status);
+        goto exit;
     }
 	
 	// Create the control device
@@ -175,12 +206,46 @@ PtpFilterDeviceD0Entry(
 )
 {
     NTSTATUS status = STATUS_SUCCESS;
+    PDEVICE_CONTEXT deviceContext;
+    BOOLEAN startTarget;
 
     PAGED_CODE();
-    UNREFERENCED_PARAMETER(Device);
     UNREFERENCED_PARAMETER(PreviousState);
     TraceEvents(TRACE_LEVEL_INFORMATION, TRACE_DEVICE, "%!FUNC! Entry");
 
+    deviceContext = PtpFilterGetContext(Device);
+
+    WdfSpinLockAcquire(deviceContext->TransportStateLock);
+    startTarget = deviceContext->HidIoTargetPurged &&
+        deviceContext->HidIoTarget != NULL;
+    WdfSpinLockRelease(deviceContext->TransportStateLock);
+
+    // D0Exit leaves the lower target purged so no stale producer can send a
+    // request while the device is down.  Re-open that gate before publishing
+    // the new D0 generation.
+    if (startTarget) {
+        status = WdfIoTargetStart(deviceContext->HidIoTarget);
+        if (!NT_SUCCESS(status)) {
+            TraceEvents(TRACE_LEVEL_ERROR, TRACE_DEVICE,
+                "%!FUNC! WdfIoTargetStart failed, Status = %!STATUS!",
+                status);
+            goto exit;
+        }
+    }
+
+    WdfSpinLockAcquire(deviceContext->TransportStateLock);
+    deviceContext->HidIoTargetPurged = FALSE;
+    deviceContext->TransportGeneration++;
+    deviceContext->RecoveryGeneration = deviceContext->TransportGeneration;
+    deviceContext->InD0 = TRUE;
+    deviceContext->DeviceConfigured = FALSE;
+    deviceContext->TransportWorkPending = FALSE;
+    deviceContext->LowerReadInFlight = FALSE;
+    deviceContext->LowerReadRequest = NULL;
+    amtptp_reset_session(&deviceContext->CoreSession);
+    WdfSpinLockRelease(deviceContext->TransportStateLock);
+
+exit:
     TraceEvents(TRACE_LEVEL_INFORMATION, TRACE_DEVICE, "%!FUNC! Exit, Status = %!STATUS!", status);
     return status;
 }
@@ -192,8 +257,10 @@ PtpFilterDeviceD0Exit(
 )
 {
     PDEVICE_CONTEXT deviceContext;
-    NTSTATUS status = STATUS_SUCCESS;
+    NTSTATUS retrieveStatus;
     WDFREQUEST outstandingRequest;
+    WDFIOTARGET hidIoTarget;
+    BOOLEAN lowerReadRemained;
 
     UNREFERENCED_PARAMETER(TargetState);
 
@@ -201,24 +268,91 @@ PtpFilterDeviceD0Exit(
     TraceEvents(TRACE_LEVEL_INFORMATION, TRACE_DEVICE, "%!FUNC! Entry");
     deviceContext = PtpFilterGetContext(Device);
 
-    // Reset device state
+    // Close the producer gate first.  Timer/work-item scheduling takes this
+    // same lock, so every callback either publishes before this transition
+    // (and is caught by the synchronous flush below) or observes the new
+    // generation and becomes a no-op.
+    WdfSpinLockAcquire(deviceContext->TransportStateLock);
+    deviceContext->InD0 = FALSE;
     deviceContext->DeviceConfigured = FALSE;
-    amtptp_reset_session(&deviceContext->CoreSession);
+    deviceContext->TransportGeneration++;
+    deviceContext->RecoveryGeneration = deviceContext->TransportGeneration;
+    deviceContext->TransportWorkPending = FALSE;
+    hidIoTarget = deviceContext->HidIoTarget;
+    WdfSpinLockRelease(deviceContext->TransportStateLock);
 
-    // Cancelling all outstanding requests
-    while (NT_SUCCESS(status)) {
-        status = WdfIoQueueRetrieveNextRequest(
+    // Automatic serialization is disabled for both objects, so these waits do
+    // not attempt to reacquire the device callback lock held by D0Exit.
+    WdfTimerStop(deviceContext->HidTransportRecoveryTimer, TRUE);
+    WdfWorkItemFlush(deviceContext->HidTransportRecoveryWorkItem);
+
+    // Purge-and-wait is the completion rundown.  Unlike cancelling a request
+    // handle, it does not return while a lower-read completion can still be
+    // using CoreSession or retrieving an upper HID read.
+    if (hidIoTarget != NULL) {
+        WdfIoTargetPurge(hidIoTarget, WdfIoTargetPurgeIoAndWait);
+    }
+
+    WdfSpinLockAcquire(deviceContext->TransportStateLock);
+    lowerReadRemained = deviceContext->LowerReadInFlight ||
+        deviceContext->LowerReadRequest != NULL;
+    deviceContext->LowerReadInFlight = FALSE;
+    deviceContext->LowerReadRequest = NULL;
+    deviceContext->LowerReadGeneration = 0;
+    deviceContext->HidIoTargetPurged = (hidIoTarget != NULL);
+    amtptp_reset_session(&deviceContext->CoreSession);
+    WdfSpinLockRelease(deviceContext->TransportStateLock);
+
+    if (lowerReadRemained) {
+        TraceEvents(TRACE_LEVEL_WARNING, TRACE_DEVICE,
+            "%!FUNC! Lower read remained published after target purge");
+    }
+
+    // Complete every upper HID read that the non-power-managed manual queue
+    // retained.  The default power-managed queue is already stopped here, so
+    // it cannot publish another upper read behind this drain.
+    for (;;) {
+        retrieveStatus = WdfIoQueueRetrieveNextRequest(
             deviceContext->HidReadQueue,
             &outstandingRequest
         );
 
-        if (NT_SUCCESS(status)) {
-            WdfRequestComplete(outstandingRequest, STATUS_CANCELLED);
+        if (!NT_SUCCESS(retrieveStatus)) {
+            break;
         }
+
+        WdfRequestComplete(outstandingRequest, STATUS_CANCELLED);
     }
 
     TraceEvents(TRACE_LEVEL_INFORMATION, TRACE_DEVICE, "%!FUNC! Exit, Status = %!STATUS!", STATUS_SUCCESS);
     return STATUS_SUCCESS;
+}
+
+BOOLEAN
+PtpFilterScheduleTransportRecovery(
+    _In_ PDEVICE_CONTEXT DeviceContext,
+    _In_ ULONG Generation,
+    _In_ ULONG DelaySeconds
+)
+{
+    BOOLEAN scheduled = FALSE;
+
+    // Start the timer while holding the same lock used by D0Exit to close the
+    // generation.  This prevents a completion that observed the old D0 state
+    // from starting the timer after D0Exit has already stopped it.
+    WdfSpinLockAcquire(DeviceContext->TransportStateLock);
+    if (DeviceContext->InD0 &&
+        DeviceContext->TransportGeneration == Generation) {
+        DeviceContext->DeviceConfigured = FALSE;
+        DeviceContext->RecoveryGeneration = Generation;
+        WdfTimerStart(
+            DeviceContext->HidTransportRecoveryTimer,
+            WDF_REL_TIMEOUT_IN_SEC(DelaySeconds));
+        scheduled = TRUE;
+    }
+    WdfSpinLockRelease(DeviceContext->TransportStateLock);
+
+    return scheduled;
 }
 
 NTSTATUS
@@ -229,7 +363,9 @@ PtpFilterSelfManagedIoInit(
     NTSTATUS status;
     PDEVICE_CONTEXT deviceContext;
     WDF_MEMORY_DESCRIPTOR hidAttributeMemoryDescriptor;
+    WDF_REQUEST_SEND_OPTIONS hidAttributeSendOptions;
     HID_DEVICE_ATTRIBUTES deviceAttributes;
+    ULONG generation;
 
     PAGED_CODE();
     TraceEvents(TRACE_LEVEL_INFORMATION, TRACE_DEVICE, "%!FUNC! Entry");
@@ -241,6 +377,15 @@ PtpFilterSelfManagedIoInit(
         goto exit;
     }
 
+    WdfSpinLockAcquire(deviceContext->TransportStateLock);
+    if (!deviceContext->InD0) {
+        WdfSpinLockRelease(deviceContext->TransportStateLock);
+        status = STATUS_DEVICE_NOT_READY;
+        goto exit;
+    }
+    generation = deviceContext->TransportGeneration;
+    WdfSpinLockRelease(deviceContext->TransportStateLock);
+
     // Request device attribute descriptor for self-identification.
     RtlZeroMemory(&deviceAttributes, sizeof(deviceAttributes));
     WDF_MEMORY_DESCRIPTOR_INIT_BUFFER(
@@ -248,11 +393,17 @@ PtpFilterSelfManagedIoInit(
         (PVOID)&deviceAttributes,
         sizeof(deviceAttributes)
     );
+    WDF_REQUEST_SEND_OPTIONS_INIT(
+        &hidAttributeSendOptions,
+        WDF_REQUEST_SEND_OPTION_SYNCHRONOUS);
+    WDF_REQUEST_SEND_OPTIONS_SET_TIMEOUT(
+        &hidAttributeSendOptions,
+        WDF_REL_TIMEOUT_IN_MS(PTP_HID_SYNC_TIMEOUT_MS));
 
     status = WdfIoTargetSendInternalIoctlSynchronously(
         deviceContext->HidIoTarget, NULL,
         IOCTL_HID_GET_DEVICE_ATTRIBUTES,
-        NULL, &hidAttributeMemoryDescriptor, NULL, NULL);
+        NULL, &hidAttributeMemoryDescriptor, &hidAttributeSendOptions, NULL);
     if (!NT_SUCCESS(status)) {
         TraceEvents(TRACE_LEVEL_ERROR, TRACE_DEVICE, "%!FUNC! WdfIoTargetSendInternalIoctlSynchronously failed, Status = %!STATUS!", status);
         goto exit;
@@ -269,15 +420,22 @@ PtpFilterSelfManagedIoInit(
         // If this failed, we will retry after 2 seconds (and pretend nothing happens)
         TraceEvents(TRACE_LEVEL_ERROR, TRACE_DEVICE, "%!FUNC! PtpFilterConfigureMultiTouch failed, Status = %!STATUS!", status);
         status = STATUS_SUCCESS;
-        WdfTimerStart(deviceContext->HidTransportRecoveryTimer, WDF_REL_TIMEOUT_IN_SEC(2));
+        PtpFilterScheduleTransportRecovery(deviceContext, generation, 2);
         goto exit;
     }
 
     // Stamp last query performance counter
     KeQueryPerformanceCounter(&deviceContext->LastReportTime);
 
-    // Set device state
-    deviceContext->DeviceConfigured = TRUE;
+    // Publish configuration only into the D0 generation that performed it.
+    WdfSpinLockAcquire(deviceContext->TransportStateLock);
+    if (deviceContext->InD0 &&
+        deviceContext->TransportGeneration == generation) {
+        deviceContext->DeviceConfigured = TRUE;
+    }
+    WdfSpinLockRelease(deviceContext->TransportStateLock);
+
+    PtpFilterInputIssueTransportRequest(Device);
 
 exit:
     TraceEvents(TRACE_LEVEL_INFORMATION, TRACE_DEVICE, "%!FUNC! Exit, Status = %!STATUS!", status);
@@ -291,10 +449,20 @@ PtpFilterSelfManagedIoRestart(
 {
     NTSTATUS status = STATUS_SUCCESS;
     PDEVICE_CONTEXT deviceContext;
+    ULONG generation;
 
     PAGED_CODE();
     TraceEvents(TRACE_LEVEL_INFORMATION, TRACE_DEVICE, "%!FUNC! Entry");
     deviceContext = PtpFilterGetContext(Device);
+
+    WdfSpinLockAcquire(deviceContext->TransportStateLock);
+    if (!deviceContext->InD0) {
+        WdfSpinLockRelease(deviceContext->TransportStateLock);
+        status = STATUS_DEVICE_NOT_READY;
+        goto exit;
+    }
+    generation = deviceContext->TransportGeneration;
+    WdfSpinLockRelease(deviceContext->TransportStateLock);
 
     // If this is first D0, it will be done in self-managed IO init.
     if (deviceContext->IsHidIoDetourCompleted) {
@@ -303,20 +471,28 @@ PtpFilterSelfManagedIoRestart(
             TraceEvents(TRACE_LEVEL_ERROR, TRACE_DEVICE, "%!FUNC! PtpFilterConfigureMultiTouch failed, Status = %!STATUS!", status);
             // If this failed, we will retry after 2 seconds (and pretend nothing happens)
             status = STATUS_SUCCESS;
-            WdfTimerStart(deviceContext->HidTransportRecoveryTimer, WDF_REL_TIMEOUT_IN_SEC(2));
+            PtpFilterScheduleTransportRecovery(deviceContext, generation, 2);
             goto exit;
         }
     }
     else {
         TraceEvents(TRACE_LEVEL_ERROR, TRACE_DEVICE, "%!FUNC! HID detour should already complete here");
         status = STATUS_INVALID_STATE_TRANSITION;
+        goto exit;
     }
 
     // Stamp last query performance counter
     KeQueryPerformanceCounter(&deviceContext->LastReportTime);
 
-    // Set device state
-    deviceContext->DeviceConfigured = TRUE;
+    // Set device state only if power did not advance while configuration ran.
+    WdfSpinLockAcquire(deviceContext->TransportStateLock);
+    if (deviceContext->InD0 &&
+        deviceContext->TransportGeneration == generation) {
+        deviceContext->DeviceConfigured = TRUE;
+    }
+    WdfSpinLockRelease(deviceContext->TransportStateLock);
+
+    PtpFilterInputIssueTransportRequest(Device);
 
 exit:
     TraceEvents(TRACE_LEVEL_INFORMATION, TRACE_DEVICE, "%!FUNC! Exit, Status = %!STATUS!", status);
@@ -354,6 +530,13 @@ PtpFilterGetHidInputReport(
     status = WdfRequestCreate(WDF_NO_OBJECT_ATTRIBUTES, deviceContext->HidIoTarget, &request);
     if (!NT_SUCCESS(status)) {
         TraceEvents(TRACE_LEVEL_ERROR, TRACE_DEVICE, "%!FUNC! WdfRequestCreate failed: %!STATUS!", status);
+        goto Exit;
+    }
+
+    status = WdfRequestAllocateTimer(request);
+    if (!NT_SUCCESS(status)) {
+        TraceEvents(TRACE_LEVEL_ERROR, TRACE_DEVICE,
+            "%!FUNC! WdfRequestAllocateTimer failed: %!STATUS!", status);
         goto Exit;
     }
 
@@ -415,10 +598,18 @@ PtpFilterGetHidInputReport(
     // Send synchronously
     WDF_REQUEST_SEND_OPTIONS sendOptions;
     WDF_REQUEST_SEND_OPTIONS_INIT(&sendOptions, WDF_REQUEST_SEND_OPTION_SYNCHRONOUS);
+    WDF_REQUEST_SEND_OPTIONS_SET_TIMEOUT(
+        &sendOptions,
+        WDF_REL_TIMEOUT_IN_MS(PTP_HID_SYNC_TIMEOUT_MS));
 
-    if (!WdfRequestSend(request, deviceContext->HidIoTarget, &sendOptions)) {
-        status = WdfRequestGetStatus(request);
-        TraceEvents(TRACE_LEVEL_ERROR, TRACE_DEVICE, "%!FUNC! WdfRequestSend failed: %!STATUS!", status);
+    BOOLEAN requestSent = WdfRequestSend(
+        request,
+        deviceContext->HidIoTarget,
+        &sendOptions);
+    status = WdfRequestGetStatus(request);
+    if (!requestSent || !NT_SUCCESS(status)) {
+        TraceEvents(TRACE_LEVEL_ERROR, TRACE_DEVICE,
+            "%!FUNC! Synchronous HID request failed: %!STATUS!", status);
         goto Exit;
     }
 
@@ -472,6 +663,15 @@ PtpFilterSendHidFeatureReport(
 
     deviceContext = PtpFilterGetContext(Device);
 
+    WdfSpinLockAcquire(deviceContext->TransportStateLock);
+    if (!deviceContext->InD0 || deviceContext->HidIoTargetPurged) {
+        WdfSpinLockRelease(deviceContext->TransportStateLock);
+        TraceEvents(TRACE_LEVEL_INFORMATION, TRACE_DEVICE,
+            "%!FUNC! Transport is stopping; feature report was not sent");
+        return STATUS_DEVICE_NOT_READY;
+    }
+    WdfSpinLockRelease(deviceContext->TransportStateLock);
+
     // Total buffer = ReportId (1 byte) + payload
     totalBufferSize = 1 + ReportDataSize;
 
@@ -479,6 +679,13 @@ PtpFilterSendHidFeatureReport(
     status = WdfRequestCreate(WDF_NO_OBJECT_ATTRIBUTES, deviceContext->HidIoTarget, &request);
     if (!NT_SUCCESS(status)) {
         TraceEvents(TRACE_LEVEL_ERROR, TRACE_DEVICE, "%!FUNC! WdfRequestCreate failed: %!STATUS!", status);
+        goto Exit;
+    }
+
+    status = WdfRequestAllocateTimer(request);
+    if (!NT_SUCCESS(status)) {
+        TraceEvents(TRACE_LEVEL_ERROR, TRACE_DEVICE,
+            "%!FUNC! WdfRequestAllocateTimer failed: %!STATUS!", status);
         goto Exit;
     }
 
@@ -536,10 +743,18 @@ PtpFilterSendHidFeatureReport(
     // Send synchronously
     WDF_REQUEST_SEND_OPTIONS sendOptions;
     WDF_REQUEST_SEND_OPTIONS_INIT(&sendOptions, WDF_REQUEST_SEND_OPTION_SYNCHRONOUS);
+    WDF_REQUEST_SEND_OPTIONS_SET_TIMEOUT(
+        &sendOptions,
+        WDF_REL_TIMEOUT_IN_MS(PTP_HID_SYNC_TIMEOUT_MS));
 
-    if (!WdfRequestSend(request, deviceContext->HidIoTarget, &sendOptions)) {
-        status = WdfRequestGetStatus(request);
-        TraceEvents(TRACE_LEVEL_ERROR, TRACE_DEVICE, "%!FUNC! WdfRequestSend failed: %!STATUS!", status);
+    BOOLEAN requestSent = WdfRequestSend(
+        request,
+        deviceContext->HidIoTarget,
+        &sendOptions);
+    status = WdfRequestGetStatus(request);
+    if (!requestSent || !NT_SUCCESS(status)) {
+        TraceEvents(TRACE_LEVEL_ERROR, TRACE_DEVICE,
+            "%!FUNC! Synchronous HID request failed: %!STATUS!", status);
         goto Exit;
     }
 
@@ -607,7 +822,7 @@ PtpFilterConfigureMultiTouch(
     WDFMEMORY hidMemory;
     WDF_OBJECT_ATTRIBUTES attributes;
     WDF_REQUEST_SEND_OPTIONS configRequestSendOptions;
-    WDFREQUEST configRequest;
+    WDFREQUEST configRequest = NULL;
     PIRP pConfigIrp = NULL;
 	PDRIVER_CONTEXT driverContext;
 
@@ -631,7 +846,15 @@ PtpFilterConfigureMultiTouch(
     if (deviceContext->VendorID == HID_VID_APPLE_BT) {
 		driverContext = PtpFilterDriverGetContext(WdfDeviceGetDriver(Device));
         PtpFilterReadSettings(driverContext);
-		PtpFilterSetHapticFeedback(Device, driverContext->FeedbackClick, driverContext->FeedbackRelease);
+		status = PtpFilterSetHapticFeedback(
+            Device,
+            driverContext->FeedbackClick,
+            driverContext->FeedbackRelease);
+        if (!NT_SUCCESS(status)) {
+            TraceEvents(TRACE_LEVEL_ERROR, TRACE_DEVICE,
+                "%!FUNC! PtpFilterSetHapticFeedback failed: %!STATUS!", status);
+            goto exit;
+        }
     }
 
     RtlZeroMemory(hidPacketBuffer, sizeof(hidPacketBuffer));
@@ -675,12 +898,30 @@ PtpFilterConfigureMultiTouch(
         goto exit;
     }
 
+    // D0Exit closes this gate before it waits for the passive recovery timer.
+    // Do not begin F1 after power-down was published; an in-flight request is
+    // still bounded by the request timeout below.
+    WdfSpinLockAcquire(deviceContext->TransportStateLock);
+    if (!deviceContext->InD0 || deviceContext->HidIoTargetPurged) {
+        WdfSpinLockRelease(deviceContext->TransportStateLock);
+        status = STATUS_DEVICE_NOT_READY;
+        goto exit;
+    }
+    WdfSpinLockRelease(deviceContext->TransportStateLock);
+
     // Init a request entity.
     // Because we bypassed HIDCLASS driver, there's a few things that we need to manually take care of.
     status = WdfRequestCreate(WDF_NO_OBJECT_ATTRIBUTES, deviceContext->HidIoTarget, &configRequest);
     if (!NT_SUCCESS(status)) {
         TraceEvents(TRACE_LEVEL_ERROR, TRACE_DEVICE, "%!FUNC! WdfRequestCreate failed, Status = %!STATUS!", status);
         goto exit;
+    }
+
+    status = WdfRequestAllocateTimer(configRequest);
+    if (!NT_SUCCESS(status)) {
+        TraceEvents(TRACE_LEVEL_ERROR, TRACE_DEVICE,
+            "%!FUNC! WdfRequestAllocateTimer failed, Status = %!STATUS!", status);
+        goto cleanup;
     }
 
     WDF_OBJECT_ATTRIBUTES_INIT(&attributes);
@@ -711,13 +952,20 @@ PtpFilterConfigureMultiTouch(
     pConfigIrp->UserBuffer = pHidPacket;
 
     WDF_REQUEST_SEND_OPTIONS_INIT(&configRequestSendOptions, WDF_REQUEST_SEND_OPTION_SYNCHRONOUS);
-    if (WdfRequestSend(configRequest, deviceContext->HidIoTarget, &configRequestSendOptions) == FALSE) {
-        status = WdfRequestGetStatus(configRequest);
-        TraceEvents(TRACE_LEVEL_ERROR, TRACE_DEVICE, "%!FUNC! WdfRequestSend failed, Status = %!STATUS!", status);
+    WDF_REQUEST_SEND_OPTIONS_SET_TIMEOUT(
+        &configRequestSendOptions,
+        WDF_REL_TIMEOUT_IN_MS(PTP_HID_SYNC_TIMEOUT_MS));
+    BOOLEAN configRequestSent = WdfRequestSend(
+        configRequest,
+        deviceContext->HidIoTarget,
+        &configRequestSendOptions);
+    status = WdfRequestGetStatus(configRequest);
+    if (!configRequestSent || !NT_SUCCESS(status)) {
+        TraceEvents(TRACE_LEVEL_ERROR, TRACE_DEVICE,
+            "%!FUNC! Synchronous HID request failed, Status = %!STATUS!", status);
         goto cleanup;
     } else {
         TraceEvents(TRACE_LEVEL_INFORMATION, TRACE_DEVICE, "%!FUNC! Changed trackpad status to multitouch mode");
-        status = STATUS_SUCCESS;
     }
 
 cleanup:
@@ -737,15 +985,47 @@ PtpFilterRecoveryTimerCallback(
     WDFDEVICE device;
     PDEVICE_CONTEXT deviceContext;
     NTSTATUS status;
+    ULONG generation;
+    BOOLEAN publishConfiguration = FALSE;
 
     device = WdfTimerGetParentObject(Timer);
     deviceContext = PtpFilterGetContext(device);
 
-    // We will try to reinitialize the device
-    status = PtpFilterSelfManagedIoRestart(device);
-    if (NT_SUCCESS(status)) {
-        // If succeeded, proceed to reissue the request.
-        // Otherwise it will retry the process after a few seconds.
+    WdfSpinLockAcquire(deviceContext->TransportStateLock);
+    generation = deviceContext->RecoveryGeneration;
+    if (!deviceContext->InD0 ||
+        generation != deviceContext->TransportGeneration) {
+        WdfSpinLockRelease(deviceContext->TransportStateLock);
+        TraceEvents(TRACE_LEVEL_INFORMATION, TRACE_DEVICE,
+            "%!FUNC! Ignoring stale recovery timer, generation = %lu",
+            generation);
+        return;
+    }
+    WdfSpinLockRelease(deviceContext->TransportStateLock);
+
+    // Run configuration directly instead of calling the framework's
+    // SelfManagedIoRestart callback.  TimerStop(TRUE) in D0Exit provides the
+    // rundown for this passive-level operation.
+    status = PtpFilterConfigureMultiTouch(device);
+    if (!NT_SUCCESS(status)) {
+        TraceEvents(TRACE_LEVEL_ERROR, TRACE_DEVICE,
+            "%!FUNC! PtpFilterConfigureMultiTouch failed, Status = %!STATUS!",
+            status);
+        PtpFilterScheduleTransportRecovery(deviceContext, generation, 2);
+        return;
+    }
+
+    KeQueryPerformanceCounter(&deviceContext->LastReportTime);
+
+    WdfSpinLockAcquire(deviceContext->TransportStateLock);
+    if (deviceContext->InD0 &&
+        deviceContext->TransportGeneration == generation) {
+        deviceContext->DeviceConfigured = TRUE;
+        publishConfiguration = TRUE;
+    }
+    WdfSpinLockRelease(deviceContext->TransportStateLock);
+
+    if (publishConfiguration) {
         PtpFilterInputIssueTransportRequest(device);
     }
 }

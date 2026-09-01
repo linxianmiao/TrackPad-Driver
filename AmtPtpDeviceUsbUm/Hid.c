@@ -801,6 +801,11 @@ AmtPtpReportFeatures(
 		}
 		case REPORTID_PTPHQA:
 		{
+			static const UCHAR certificationBlob[] = { DEFAULT_PTP_HQA_BLOB };
+			C_ASSERT(
+				sizeof(certificationBlob) ==
+					sizeof(((PPTP_DEVICE_HQA_CERTIFICATION_REPORT)0)->CertificationBlob));
+
 			TraceEvents(
 				TRACE_LEVEL_INFORMATION, 
 				TRACE_DRIVER, 
@@ -821,7 +826,10 @@ AmtPtpReportFeatures(
 
 			PPTP_DEVICE_HQA_CERTIFICATION_REPORT certReport = (PPTP_DEVICE_HQA_CERTIFICATION_REPORT) packet.reportBuffer;
 
-			*certReport->CertificationBlob = DEFAULT_PTP_HQA_BLOB;
+			RtlCopyMemory(
+				certReport->CertificationBlob,
+				certificationBlob,
+				sizeof(certificationBlob));
 			certReport->ReportID = REPORTID_PTPHQA;
 
 			TraceEvents(

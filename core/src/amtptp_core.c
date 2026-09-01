@@ -2,69 +2,69 @@
 
 #define AMTPTP_UNUSED_CONTACT_ID 0xffffffffu
 
-static uint16_t amtptp_read_u16_le(const uint8_t *input)
+static amtptp_u16 amtptp_read_u16_le(const amtptp_u8 *input)
 {
-    return (uint16_t)((uint16_t)input[0] | ((uint16_t)input[1] << 8));
+    return (amtptp_u16)((amtptp_u16)input[0] | ((amtptp_u16)input[1] << 8));
 }
 
-static uint32_t amtptp_read_u32_le(const uint8_t *input)
+static amtptp_u32 amtptp_read_u32_le(const amtptp_u8 *input)
 {
-    return (uint32_t)input[0]
-        | ((uint32_t)input[1] << 8)
-        | ((uint32_t)input[2] << 16)
-        | ((uint32_t)input[3] << 24);
+    return (amtptp_u32)input[0]
+        | ((amtptp_u32)input[1] << 8)
+        | ((amtptp_u32)input[2] << 16)
+        | ((amtptp_u32)input[3] << 24);
 }
 
-static void amtptp_write_u16_le(uint8_t *output, uint16_t value)
+static void amtptp_write_u16_le(amtptp_u8 *output, amtptp_u16 value)
 {
-    output[0] = (uint8_t)(value & 0xffu);
-    output[1] = (uint8_t)((value >> 8) & 0xffu);
+    output[0] = (amtptp_u8)(value & 0xffu);
+    output[1] = (amtptp_u8)((value >> 8) & 0xffu);
 }
 
-static void amtptp_write_u32_le(uint8_t *output, uint32_t value)
+static void amtptp_write_u32_le(amtptp_u8 *output, amtptp_u32 value)
 {
-    output[0] = (uint8_t)(value & 0xffu);
-    output[1] = (uint8_t)((value >> 8) & 0xffu);
-    output[2] = (uint8_t)((value >> 16) & 0xffu);
-    output[3] = (uint8_t)((value >> 24) & 0xffu);
+    output[0] = (amtptp_u8)(value & 0xffu);
+    output[1] = (amtptp_u8)((value >> 8) & 0xffu);
+    output[2] = (amtptp_u8)((value >> 16) & 0xffu);
+    output[3] = (amtptp_u8)((value >> 24) & 0xffu);
 }
 
-static int16_t amtptp_sign_extend_13(uint16_t value)
+static amtptp_i16 amtptp_sign_extend_13(amtptp_u16 value)
 {
     value &= 0x1fffu;
     if ((value & 0x1000u) != 0u) {
         value |= 0xe000u;
     }
-    return (int16_t)value;
+    return (amtptp_i16)value;
 }
 
-static uint16_t amtptp_clamp_coordinate(int32_t value, uint16_t maximum)
+static amtptp_u16 amtptp_clamp_coordinate(amtptp_i32 value, amtptp_u16 maximum)
 {
     if (value <= 0) {
         return 0u;
     }
-    if ((uint32_t)value >= (uint32_t)maximum) {
+    if ((amtptp_u32)value >= (amtptp_u32)maximum) {
         return maximum;
     }
-    return (uint16_t)value;
+    return (amtptp_u16)value;
 }
 
-static uint16_t amtptp_active_id_mask(const amtptp_raw_frame *input)
+static amtptp_u16 amtptp_active_id_mask(const amtptp_raw_frame *input)
 {
-    uint16_t mask = 0u;
-    uint8_t index;
+    amtptp_u16 mask = 0u;
+    amtptp_u8 index;
 
     for (index = 0u; index < input->contact_count; ++index) {
-        mask |= (uint16_t)(1u << (input->contacts[index].id & 0x0fu));
+        mask |= (amtptp_u16)(1u << (input->contacts[index].id & 0x0fu));
     }
     return mask;
 }
 
 static amtptp_locked_contact *amtptp_find_lock(
     amtptp_session *session,
-    uint32_t id)
+    amtptp_u32 id)
 {
-    uint8_t index;
+    amtptp_u8 index;
 
     for (index = 0u; index < 2u; ++index) {
         if (session->locked_contacts[index].id == id) {
@@ -76,10 +76,10 @@ static amtptp_locked_contact *amtptp_find_lock(
 
 static amtptp_locked_contact *amtptp_claim_lock(
     amtptp_session *session,
-    uint32_t id)
+    amtptp_u32 id)
 {
     amtptp_locked_contact *existing = amtptp_find_lock(session, id);
-    uint8_t index;
+    amtptp_u8 index;
 
     if (existing != NULL) {
         return existing;
@@ -118,7 +118,7 @@ void amtptp_default_options(amtptp_options *options)
 
 void amtptp_reset_session(amtptp_session *session)
 {
-    uint8_t index;
+    amtptp_u8 index;
 
     if (session == NULL) {
         return;
@@ -138,12 +138,12 @@ void amtptp_reset_session(amtptp_session *session)
 }
 
 amtptp_status amtptp_decode_mt2(
-    const uint8_t *input,
-    size_t input_length,
+    const amtptp_u8 *input,
+    amtptp_size input_length,
     amtptp_raw_frame *output)
 {
-    size_t contact_count;
-    size_t index;
+    amtptp_size contact_count;
+    amtptp_size index;
 
     if (input == NULL || output == NULL) {
         return AMTPTP_ERROR_ARGUMENT;
@@ -165,29 +165,29 @@ amtptp_status amtptp_decode_mt2(
         return AMTPTP_ERROR_REPORT_LENGTH;
     }
 
-    output->button = (uint8_t)(input[1] & 0x01u);
-    output->timestamp_ms = ((uint32_t)amtptp_read_u16_le(&input[2]) << 5)
-        | ((uint32_t)input[1] >> 3);
-    output->contact_count = (uint8_t)contact_count;
+    output->button = (amtptp_u8)(input[1] & 0x01u);
+    output->timestamp_ms = ((amtptp_u32)amtptp_read_u16_le(&input[2]) << 5)
+        | ((amtptp_u32)input[1] >> 3);
+    output->contact_count = (amtptp_u8)contact_count;
 
     for (index = 0u; index < contact_count; ++index) {
-        const uint8_t *encoded = &input[
+        const amtptp_u8 *encoded = &input[
             AMTPTP_APPLE_HEADER_SIZE + index * AMTPTP_APPLE_CONTACT_SIZE];
-        uint32_t packed = amtptp_read_u32_le(encoded);
+        amtptp_u32 packed = amtptp_read_u32_le(encoded);
         amtptp_raw_contact *contact = &output->contacts[index];
 
         contact->absolute_x = amtptp_sign_extend_13(
-            (uint16_t)(packed & 0x1fffu));
+            (amtptp_u16)(packed & 0x1fffu));
         contact->absolute_y = amtptp_sign_extend_13(
-            (uint16_t)((packed >> 13) & 0x1fffu));
-        contact->finger = (uint8_t)((packed >> 26) & 0x07u);
-        contact->state = (uint8_t)((packed >> 29) & 0x07u);
+            (amtptp_u16)((packed >> 13) & 0x1fffu));
+        contact->finger = (amtptp_u8)((packed >> 26) & 0x07u);
+        contact->state = (amtptp_u8)((packed >> 29) & 0x07u);
         contact->touch_major = encoded[4];
         contact->touch_minor = encoded[5];
         contact->size = encoded[6];
         contact->pressure = encoded[7];
-        contact->id = (uint8_t)(encoded[8] & 0x0fu);
-        contact->orientation = (uint8_t)((encoded[8] >> 5) & 0x07u);
+        contact->id = (amtptp_u8)(encoded[8] & 0x0fu);
+        contact->orientation = (amtptp_u8)((encoded[8] >> 5) & 0x07u);
     }
 
     return AMTPTP_OK;
@@ -199,11 +199,11 @@ amtptp_status amtptp_convert_ptp(
     const amtptp_raw_frame *input,
     amtptp_frame *output)
 {
-    uint16_t present_mask;
-    uint16_t next_admitted_mask = 0u;
-    uint8_t selected_indices[AMTPTP_MAX_PTP_CONTACTS];
-    uint8_t admitted_count = 0u;
-    uint8_t index;
+    amtptp_u16 present_mask;
+    amtptp_u16 next_admitted_mask = 0u;
+    amtptp_u8 selected_indices[AMTPTP_MAX_PTP_CONTACTS];
+    amtptp_u8 admitted_count = 0u;
+    amtptp_u8 index;
 
     if (session == NULL || options == NULL || input == NULL || output == NULL) {
         return AMTPTP_ERROR_ARGUMENT;
@@ -216,7 +216,7 @@ amtptp_status amtptp_convert_ptp(
     session->suppressed_mask &= present_mask;
     session->admitted_mask &= present_mask;
 
-    output->scan_time = (uint16_t)(input->timestamp_ms * 10u);
+    output->scan_time = (amtptp_u16)(input->timestamp_ms * 10u);
     output->button = options->button_disabled != 0u ? 0u : input->button;
     output->contact_count = 0u;
 
@@ -236,7 +236,7 @@ amtptp_status amtptp_convert_ptp(
      */
     for (index = 0u; index < input->contact_count; ++index) {
         const amtptp_raw_contact *raw = &input->contacts[index];
-        uint16_t id_bit = (uint16_t)(1u << (raw->id & 0x0fu));
+        amtptp_u16 id_bit = (amtptp_u16)(1u << (raw->id & 0x0fu));
 
         if ((session->admitted_mask & id_bit) == 0u
             || (session->suppressed_mask & id_bit) != 0u
@@ -251,7 +251,7 @@ amtptp_status amtptp_convert_ptp(
 
     for (index = 0u; index < input->contact_count; ++index) {
         const amtptp_raw_contact *raw = &input->contacts[index];
-        uint16_t id_bit = (uint16_t)(1u << (raw->id & 0x0fu));
+        amtptp_u16 id_bit = (amtptp_u16)(1u << (raw->id & 0x0fu));
 
         if ((session->admitted_mask & id_bit) != 0u
             || (session->suppressed_mask & id_bit) != 0u
@@ -272,15 +272,15 @@ amtptp_status amtptp_convert_ptp(
         const amtptp_raw_contact *raw =
             &input->contacts[selected_indices[index]];
         {
-            int32_t x = (int32_t)raw->absolute_x - options->x_min;
-            int32_t y = -(int32_t)raw->absolute_y - options->y_min;
+            amtptp_i32 x = (amtptp_i32)raw->absolute_x - options->x_min;
+            amtptp_i32 y = -(amtptp_i32)raw->absolute_y - options->y_min;
             amtptp_contact *ptp = &output->contacts[index];
             amtptp_locked_contact *locked;
-            uint8_t tip = (uint8_t)(
+            amtptp_u8 tip = (amtptp_u8)(
                 (raw->state & 0x04u) != 0u
                 && (options->ignore_near_fingers == 0u
                     || (raw->state & 0x02u) == 0u));
-            uint8_t should_move = (uint8_t)(
+            amtptp_u8 should_move = (amtptp_u8)(
                 (options->ignore_button_finger == 0u
                     || session->previous_button == 0u
                     || output->button == 0u)
@@ -293,7 +293,7 @@ amtptp_status amtptp_convert_ptp(
             ptp->x = amtptp_clamp_coordinate(x, options->x_max);
             ptp->y = amtptp_clamp_coordinate(y, options->y_max);
             ptp->tip_switch = tip;
-            ptp->confidence = (uint8_t)(
+            ptp->confidence = (amtptp_u8)(
                 options->palm_rejection == 0u || raw->finger != 6u);
 
             locked = amtptp_claim_lock(session, raw->id);
@@ -322,12 +322,12 @@ amtptp_status amtptp_convert_ptp(
 
 amtptp_status amtptp_serialize_ptp(
     const amtptp_frame *input,
-    uint8_t *output,
-    size_t output_capacity,
-    size_t *output_length)
+    amtptp_u8 *output,
+    amtptp_size output_capacity,
+    amtptp_size *output_length)
 {
-    size_t index;
-    size_t offset = 1u;
+    amtptp_size index;
+    amtptp_size offset = 1u;
 
     if (input == NULL || output == NULL || output_length == NULL) {
         return AMTPTP_ERROR_ARGUMENT;
@@ -342,7 +342,7 @@ amtptp_status amtptp_serialize_ptp(
     output[0] = AMTPTP_PTP_REPORT_ID;
     for (index = 0u; index < AMTPTP_MAX_PTP_CONTACTS; ++index) {
         const amtptp_contact *contact = &input->contacts[index];
-        output[offset] = (uint8_t)(
+        output[offset] = (amtptp_u8)(
             (contact->confidence & 0x01u)
             | ((contact->tip_switch & 0x01u) << 1));
         amtptp_write_u32_le(&output[offset + 1u], contact->id);
@@ -352,7 +352,7 @@ amtptp_status amtptp_serialize_ptp(
     }
     amtptp_write_u16_le(&output[offset], input->scan_time);
     output[offset + 2u] = input->contact_count;
-    output[offset + 3u] = (uint8_t)(input->button & 0x01u);
+    output[offset + 3u] = (amtptp_u8)(input->button & 0x01u);
     *output_length = AMTPTP_PTP_REPORT_SIZE;
     return AMTPTP_OK;
 }

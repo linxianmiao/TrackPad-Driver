@@ -12,9 +12,61 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+throw @"
+Driver packaging is quarantined for this branch. The current INF still contains
+the legacy NullDevice/filter registration and broad, unverified device bindings.
+Do not sign or create an installable package until a dedicated 004C:0324
+Bluetooth VHF INF and its filter ordering have passed review and hardware gates.
+"@
+
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $outputDirectory = Join-Path $repositoryRoot "build\test-package\$Platform"
 $packagesDirectory = Join-Path $repositoryRoot "packages"
+$legacyDetourPath = Join-Path $repositoryRoot "AmtPtpHidFilter\Detour.c"
+$legacyPrivateHeaderPath = Join-Path $repositoryRoot "AmtPtpHidFilter\include\Hac.h"
+$filterProjectPath = Join-Path $repositoryRoot "AmtPtpHidFilter\AmtPtpHidFilter.vcxproj"
+$requiredVhfSources = @(
+    (Join-Path $repositoryRoot "AmtPtpHidFilter\VhfDevice.c"),
+    (Join-Path $repositoryRoot "AmtPtpHidFilter\PhysicalHid.c"),
+    (Join-Path $repositoryRoot "AmtPtpHidFilter\PtpReports.c")
+)
+
+if ($SkipBuild) {
+    throw @"
+-SkipBuild is disabled for driver packaging. A clean rebuild is required so a
+stale legacy filter binary cannot be copied into a signed package.
+"@
+}
+
+if ((Test-Path -LiteralPath $legacyDetourPath -PathType Leaf) -or
+    (Test-Path -LiteralPath $legacyPrivateHeaderPath -PathType Leaf)) {
+    throw @"
+Driver packaging is disabled while the legacy detour/private-layout sources are present.
+The legacy filter changes another driver's shared dispatch table and is not a
+supported release architecture. Complete the VHF migration and remove the
+detour/private-layout dependency before creating a signed or installable package.
+"@
+}
+
+$missingVhfSources = @($requiredVhfSources | Where-Object {
+    -not (Test-Path -LiteralPath $_ -PathType Leaf)
+})
+if ($missingVhfSources.Count -ne 0) {
+    throw "Driver packaging requires the completed VHF source set: $($missingVhfSources -join ', ')"
+}
+
+$filterProjectText = [System.IO.File]::ReadAllText($filterProjectPath)
+if ($filterProjectText -match '(?i)(?:Detour\.c|include[\\/]Hac\.h)' -or
+    $filterProjectText -notmatch '(?i)\bVhfKm\.lib\b' -or
+    $filterProjectText -notmatch '(?i)\bVhfDevice\.c\b' -or
+    $filterProjectText -notmatch '(?i)\bPhysicalHid\.c\b' -or
+    $filterProjectText -notmatch '(?i)\bPtpReports\.c\b') {
+    throw @"
+AmtPtpHidFilter.vcxproj is not release-ready. It must exclude Detour/Hac, include
+the VHF/physical-HID/PTP source set, and link VhfKm.lib before packaging.
+"@
+}
 
 function Find-KitTool {
     param(
@@ -50,55 +102,47 @@ function Invoke-Checked {
     }
 }
 
-if (-not $SkipBuild) {
-    if (-not (Get-Command nuget.exe -ErrorAction SilentlyContinue)) {
-        throw "nuget.exe is not available on PATH"
-    }
-    if (-not (Get-Command msbuild.exe -ErrorAction SilentlyContinue)) {
-        throw "msbuild.exe is not available on PATH"
-    }
-
-    Invoke-Checked -Command nuget.exe -Arguments @(
-        "restore",
-        (Join-Path $repositoryRoot "AmtPtpDeviceUsbUm\MagicTrackpad2PtpDevice.vcxproj"),
-        "-PackagesDirectory",
-        $packagesDirectory
-    )
-    Invoke-Checked -Command nuget.exe -Arguments @(
-        "restore",
-        (Join-Path $repositoryRoot "AmtPtpHidFilter\AmtPtpHidFilter.vcxproj"),
-        "-PackagesDirectory",
-        $packagesDirectory
-    )
-
-    Invoke-Checked -Command msbuild.exe -Arguments @(
-        (Join-Path $repositoryRoot "AmtPtpDeviceUsbUm\MagicTrackpad2PtpDevice.vcxproj"),
-        "/p:Configuration=$Configuration",
-        "/p:Platform=$Platform",
-        "/p:ApiValidator_Enable=false"
-    )
-    Invoke-Checked -Command msbuild.exe -Arguments @(
-        (Join-Path $repositoryRoot "AmtPtpHidFilter\AmtPtpHidFilter.vcxproj"),
-        "/p:Configuration=$Configuration",
-        "/p:Platform=$Platform",
-        "/p:ApiValidator_Enable=false"
-    )
+if (-not (Get-Command nuget.exe -ErrorAction SilentlyContinue)) {
+    throw "nuget.exe is not available on PATH"
+}
+if (-not (Get-Command msbuild.exe -ErrorAction SilentlyContinue)) {
+    throw "msbuild.exe is not available on PATH"
 }
 
-New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
-$generatedFiles = @(
-    "AmtPtpDevice.inf",
-    "AmtPtpDeviceUsbUm.dll",
-    "AmtPtpHidFilter.sys",
-    "AmtPtpDevice.cat",
-    "MagicPadDriverLabTest.cer"
+Invoke-Checked -Command nuget.exe -Arguments @(
+    "restore",
+    (Join-Path $repositoryRoot "AmtPtpDeviceUsbUm\MagicTrackpad2PtpDevice.vcxproj"),
+    "-PackagesDirectory",
+    $packagesDirectory
 )
-foreach ($fileName in $generatedFiles) {
-    $generatedPath = Join-Path $outputDirectory $fileName
-    if (Test-Path $generatedPath) {
-        Remove-Item $generatedPath -Force
-    }
+Invoke-Checked -Command nuget.exe -Arguments @(
+    "restore",
+    (Join-Path $repositoryRoot "AmtPtpHidFilter\AmtPtpHidFilter.vcxproj"),
+    "-PackagesDirectory",
+    $packagesDirectory
+)
+
+Invoke-Checked -Command msbuild.exe -Arguments @(
+    (Join-Path $repositoryRoot "AmtPtpDeviceUsbUm\MagicTrackpad2PtpDevice.vcxproj"),
+    "/t:Rebuild",
+    "/p:Configuration=$Configuration",
+    "/p:Platform=$Platform",
+    "/p:ApiValidator_Enable=false"
+)
+Invoke-Checked -Command msbuild.exe -Arguments @(
+    (Join-Path $repositoryRoot "AmtPtpHidFilter\AmtPtpHidFilter.vcxproj"),
+    "/t:Rebuild",
+    "/p:Configuration=$Configuration",
+    "/p:Platform=$Platform",
+    "/p:ApiValidator_Enable=false"
+)
+
+if (Test-Path -LiteralPath $outputDirectory) {
+    # Platform is ValidateSet-constrained and outputDirectory is rooted below
+    # build\test-package, so a future packaging run cannot retain stale files.
+    Remove-Item -LiteralPath $outputDirectory -Recurse -Force
 }
+New-Item -ItemType Directory -Path $outputDirectory | Out-Null
 
 $infName = if ($Platform -eq "x64") {
     "AmtPtpDevice_AMD64.inf"
