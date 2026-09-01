@@ -138,8 +138,8 @@ assert.match(
 );
 assert.match(
   workflow,
-  /legacy-compile:[\s\S]*?vs-version:\s*'\[17\.0,18\.0\)'/u,
-  `${workflowPath}: NuGet WDK compile must use compatible MSBuild 17`,
+  /legacy-compile:[\s\S]*?runs-on:\s*windows-2022[\s\S]*?vs-version:\s*'\[17\.0,18\.0\)'/u,
+  `${workflowPath}: NuGet WDK compile must use Windows 2022 and MSBuild 17`,
 );
 
 const collectorPath = "scripts/windows/Collect-MagicTrackpadDiagnostics.ps1";
