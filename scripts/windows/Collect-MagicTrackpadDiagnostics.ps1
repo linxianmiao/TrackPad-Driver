@@ -7,6 +7,8 @@ param(
 
     [string]$WprProfilePath,
 
+    [string]$HidProbePath,
+
     [switch]$IncludeSensitiveIdentifiers,
 
     [switch]$NoArchive
@@ -17,6 +19,7 @@ $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $targetPattern = '(?i)VID&0001004C_PID&0324'
+$targetContextPattern = '(?i)(VID&0001004C_PID&0324|VID_(?:004C|8910)&PID_0324|Magic\s*Trackpad|AmtPtp)'
 $captureStartedAt = Get-Date
 
 function Write-Utf8File {
@@ -70,16 +73,35 @@ function Protect-DiagnosticText {
 
     $protected = $Text
     if (-not [string]::IsNullOrEmpty($env:COMPUTERNAME)) {
-        $protected = $protected.Replace($env:COMPUTERNAME, "COMPUTER_REDACTED")
+        $protected = [regex]::Replace(
+            $protected,
+            [regex]::Escape($env:COMPUTERNAME),
+            "COMPUTER_REDACTED",
+            [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
     }
     if (-not [string]::IsNullOrEmpty($env:USERNAME)) {
-        $protected = $protected.Replace($env:USERNAME, "USER_REDACTED")
+        $protected = [regex]::Replace(
+            $protected,
+            [regex]::Escape($env:USERNAME),
+            "USER_REDACTED",
+            [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
     }
 
     $protected = [regex]::Replace(
         $protected,
-        '(?im)(HID|BTHENUM|BTHLEDEVICE|USB|PCI)\\([^\r\n\\]+)\\[^\r\n\s"]+',
-        '$1\$2\INSTANCE_REDACTED')
+        '(?im)("(?:interfacePath|instanceId)"\s*:\s*")[^"]*(")',
+        '$1IDENTIFIER_REDACTED$2')
+    # Device interface paths appear with two backslashes in command output and
+    # four after JSON escaping. Replace the whole token so sanitizing serialized
+    # JSON cannot introduce an invalid backslash escape.
+    $protected = [regex]::Replace(
+        $protected,
+        '(?i)[\\]{2,4}\?[\\]{1,2}(?:HID|BTH|BTHENUM|BTHLEDEVICE|USB|PCI)#[^"\r\n\s]+',
+        'DEVICE_INTERFACE_REDACTED')
+    $protected = [regex]::Replace(
+        $protected,
+        '(?i)(?:HID|BTH|BTHENUM|BTHLEDEVICE|USB|PCI)[\\]{1,2}[^"\r\n\\]+[\\]{1,2}[^\r\n\s"]+',
+        'DEVICE_INSTANCE_REDACTED')
     $protected = [regex]::Replace(
         $protected,
         '(?im)^(\s*Container ID\s*:\s*).+$',
@@ -113,6 +135,21 @@ function Convert-PropertyValue {
         return @($Value | ForEach-Object { Protect-DiagnosticText ([string]$_) })
     }
     return Protect-DiagnosticText ([string]$Value)
+}
+
+function Get-CollectionLabel {
+    param(
+        [AllowEmptyString()]
+        [string]$Text
+    )
+
+    $match = [regex]::Match(
+        $Text,
+        '(?i)(?:&|#|_)Col([0-9A-F]{2})(?:&|#|\\|$)')
+    if ($match.Success) {
+        return "Col$($match.Groups[1].Value.ToUpperInvariant())"
+    }
+    return $null
 }
 
 function Invoke-TextCommand {
@@ -302,6 +339,7 @@ foreach ($device in $targetDevices) {
 
     $deviceRecords += [ordered]@{
         alias = $alias
+        collection = Get-CollectionLabel ([string]$device.InstanceId)
         status = [string]$device.Status
         class = [string]$device.Class
         friendlyName = Protect-DiagnosticText ([string]$device.FriendlyName)
@@ -322,8 +360,7 @@ foreach ($device in $targetDevices) {
             "/services",
             "/stack",
             "/drivers",
-            "/interfaces",
-            "/properties"
+            "/interfaces"
         )
         Write-Utf8File -Path (Join-Path $OutputDirectory "$alias-pnputil.txt") `
             -Content $pnpOutput
@@ -336,6 +373,123 @@ foreach ($device in $targetDevices) {
 
 Write-Utf8File -Path (Join-Path $OutputDirectory "devices.json") `
     -Content (ConvertTo-JsonText $deviceRecords -Depth 10)
+
+$hidCapsStatus = "capsUnavailable"
+$resolvedHidProbePath = $null
+$hidProbeSha256 = $null
+$hidProbeSelectionErrors = @()
+$hidProbeCandidates = @()
+if (-not [string]::IsNullOrWhiteSpace($HidProbePath)) {
+    $hidProbeCandidates += [System.IO.Path]::GetFullPath($HidProbePath)
+}
+$hidProbeCandidates += [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot `
+    "MagicPadHidProbe.exe"))
+$hidProbeCandidates += [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot `
+    "..\..\tools\windows\MagicPadHidProbe\build\x64\Release\MagicPadHidProbe.exe"))
+
+foreach ($candidate in $hidProbeCandidates | Select-Object -Unique) {
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+        try {
+            $candidateHash = Get-FileHash -LiteralPath $candidate -Algorithm SHA256
+            $resolvedHidProbePath = $candidate
+            $hidProbeSha256 = $candidateHash.Hash.ToLowerInvariant()
+            break
+        }
+        catch {
+            $hidProbeSelectionErrors += Protect-DiagnosticText (
+                "Unable to hash candidate '{0}': {1}" -f $candidate, $_.Exception.Message)
+        }
+    }
+}
+
+$hidCapsPath = Join-Path $OutputDirectory "hid-caps.json"
+if ($null -eq $resolvedHidProbePath) {
+    $unavailableCaps = [ordered]@{
+        schema = "magicpad-hid-probe/v1"
+        status = "capsUnavailable"
+        reason = if ($hidProbeSelectionErrors.Count -eq 0) {
+            "MagicPadHidProbe.exe was not found; PnP diagnostics remain available."
+        } else {
+            "MagicPadHidProbe.exe was unavailable; PnP diagnostics remain available."
+        }
+        selectionErrors = $hidProbeSelectionErrors
+        searchedPaths = @($hidProbeCandidates | Select-Object -Unique |
+            ForEach-Object { Protect-DiagnosticText ([string]$_) })
+    }
+    Write-Utf8File -Path $hidCapsPath `
+        -Content (ConvertTo-JsonText $unavailableCaps -Depth 6)
+}
+else {
+    try {
+        $probeStartInfo = New-Object System.Diagnostics.ProcessStartInfo
+        $probeStartInfo.FileName = $resolvedHidProbePath
+        $probeStartInfo.UseShellExecute = $false
+        $probeStartInfo.CreateNoWindow = $true
+        $probeStartInfo.RedirectStandardOutput = $true
+        $probeStartInfo.RedirectStandardError = $true
+
+        $probeProcess = [System.Diagnostics.Process]::Start($probeStartInfo)
+        $probeStdoutTask = $probeProcess.StandardOutput.ReadToEndAsync()
+        $probeStderrTask = $probeProcess.StandardError.ReadToEndAsync()
+
+        if (-not $probeProcess.WaitForExit(15000)) {
+            try {
+                $probeProcess.Kill()
+            }
+            finally {
+                $probeProcess.WaitForExit()
+            }
+            throw "MagicPadHidProbe exceeded the 15-second timeout and was terminated."
+        }
+
+        $probeStdout = $probeStdoutTask.GetAwaiter().GetResult()
+        $probeStderr = $probeStderrTask.GetAwaiter().GetResult()
+
+        if ($probeProcess.ExitCode -ne 0) {
+            throw "MagicPadHidProbe exited with code $($probeProcess.ExitCode): $probeStderr"
+        }
+
+        $probeDocument = ConvertFrom-Json -InputObject $probeStdout -ErrorAction Stop
+        if ([string]$probeDocument.schema -ne "magicpad-hid-probe/v1") {
+            throw "MagicPadHidProbe returned an unexpected schema."
+        }
+
+        $hidCapsStatus = [string]$probeDocument.status
+        $probeDocument | Add-Member -NotePropertyName probeBinarySha256 `
+            -NotePropertyValue $hidProbeSha256 -Force
+        if (-not $IncludeSensitiveIdentifiers) {
+            $probeInterfaceIndex = 0
+            foreach ($probeDevice in @($probeDocument.devices)) {
+                $probeInterfaceIndex++
+                $probeDevice | Add-Member -NotePropertyName interfaceAlias `
+                    -NotePropertyValue ("hid-interface-{0:d2}" -f $probeInterfaceIndex) -Force
+                if ($null -ne $probeDevice.PSObject.Properties["interfacePath"]) {
+                    $probeDevice.interfacePath = "IDENTIFIER_REDACTED"
+                }
+                if ($null -ne $probeDevice.PSObject.Properties["instanceId"]) {
+                    $probeDevice.instanceId = "IDENTIFIER_REDACTED"
+                }
+            }
+        }
+        Write-Utf8File -Path $hidCapsPath `
+            -Content (Protect-DiagnosticText (ConvertTo-JsonText $probeDocument -Depth 30))
+        if (-not [string]::IsNullOrWhiteSpace($probeStderr)) {
+            Write-Utf8File -Path (Join-Path $OutputDirectory "hid-probe-stderr.txt") `
+                -Content (Protect-DiagnosticText $probeStderr)
+        }
+    }
+    catch {
+        $hidCapsStatus = "capsUnavailable"
+        $unavailableCaps = [ordered]@{
+            schema = "magicpad-hid-probe/v1"
+            status = "capsUnavailable"
+            reason = Protect-DiagnosticText $_.Exception.Message
+            probePath = Protect-DiagnosticText $resolvedHidProbePath
+        }
+        Write-Utf8File -Path $hidCapsPath `
+            -Content (ConvertTo-JsonText $unavailableCaps -Depth 6)
+    }
+}
 
 try {
     $driverInventory = Invoke-TextCommand -Command "pnputil.exe" `
@@ -362,13 +516,20 @@ catch {
 
 $eventStart = (Get-Date).AddHours(-2)
 try {
-    $systemEvents = @(Get-WinEvent -FilterHashtable @{
+    $recentSystemEvents = @(Get-WinEvent -FilterHashtable @{
         LogName = "System"
         StartTime = $eventStart
-    } -ErrorAction Stop | Where-Object {
-        $_.ProviderName -match '(?i)(Kernel-PnP|UserPnp|DriverFrameworks|BTHUSB|BTHMINI|HidBth|Kernel-Power|Power-Troubleshooter)' -or
-        $_.Message -match '(?i)(0324|Magic Trackpad|AmtPtp)'
-    } | Select-Object -First 500 TimeCreated, Id, LevelDisplayName, ProviderName, Message)
+    } -ErrorAction Stop)
+    $targetDeviceEvents = @($recentSystemEvents | Where-Object {
+        $_.Message -match $targetContextPattern
+    } | Select-Object -First 300 TimeCreated, Id, LevelDisplayName, ProviderName, Message)
+    $powerEvents = @($recentSystemEvents | Where-Object {
+        $_.ProviderName -match '(?i)^(Microsoft-Windows-)?(Kernel-Power|Power-Troubleshooter)$'
+    } | Select-Object -First 100 TimeCreated, Id, LevelDisplayName, ProviderName)
+    $systemEvents = [ordered]@{
+        targetDeviceEvents = $targetDeviceEvents
+        powerEventsWithoutMessage = $powerEvents
+    }
     Write-Utf8File -Path (Join-Path $OutputDirectory "system-events.json") `
         -Content (Protect-DiagnosticText (ConvertTo-JsonText $systemEvents -Depth 6))
 }
@@ -396,7 +557,7 @@ $setupApiLog = Join-Path $env:windir "inf\setupapi.dev.log"
 if (Test-Path -LiteralPath $setupApiLog) {
     try {
         $setupMatches = @(Select-String -Path $setupApiLog `
-            -Pattern '0324|MagicTrackpad|AmtPtp' -AllMatches | Select-Object -Last 500)
+            -Pattern $targetContextPattern -AllMatches | Select-Object -Last 500)
         Write-Utf8File -Path (Join-Path $OutputDirectory "setupapi-matches.txt") `
             -Content (Protect-DiagnosticText ($setupMatches | ForEach-Object {
                 "{0}:{1}: {2}" -f $_.Path, $_.LineNumber, $_.Line
@@ -458,6 +619,8 @@ $manifest = [ordered]@{
         productId = "0x0324"
     }
     targetDeviceCount = $targetDevices.Count
+    hidCapsStatus = $hidCapsStatus
+    hidProbeSha256 = $hidProbeSha256
     sensitiveIdentifiersIncluded = [bool]$IncludeSensitiveIdentifiers
     traceSeconds = $TraceSeconds
     notes = @(

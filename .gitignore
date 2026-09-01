@@ -3,8 +3,10 @@ bin/
 obj/
 AmtPtpDeviceUsbUm/build/
 AmtPtpHidFilter/build/
+tools/windows/MagicPadHidProbe/build/
 intermediate/
 build/result/
+/diagnostics/
 /packages
 core/build/
 simulator/node_modules/
