@@ -232,6 +232,11 @@ PtpFilterGetHidFeatures(
 	}
 	case REPORTID_PTPHQA:
 	{
+		static const UCHAR certificationBlob[] = { DEFAULT_PTP_HQA_BLOB };
+		C_ASSERT(
+			sizeof(certificationBlob) ==
+				sizeof(((PPTP_DEVICE_HQA_CERTIFICATION_REPORT)0)->CertificationBlob));
+
 		TraceEvents(TRACE_LEVEL_INFORMATION, TRACE_HID, "%!FUNC! Report REPORTID_PTPHQA is requested");
 
 		// Size sanity check
@@ -244,7 +249,10 @@ PtpFilterGetHidFeatures(
 		}
 
 		PPTP_DEVICE_HQA_CERTIFICATION_REPORT certReport = (PPTP_DEVICE_HQA_CERTIFICATION_REPORT)hidContent->reportBuffer;
-		*certReport->CertificationBlob = DEFAULT_PTP_HQA_BLOB;
+		RtlCopyMemory(
+			certReport->CertificationBlob,
+			certificationBlob,
+			sizeof(certificationBlob));
 		certReport->ReportID = REPORTID_PTPHQA;
 
 		TraceEvents(TRACE_LEVEL_INFORMATION, TRACE_HID, "%!FUNC! Report REPORTID_PTPHQA is fulfilled");
@@ -257,6 +265,8 @@ PtpFilterGetHidFeatures(
 		goto exit;
 	}
 	}
+
+	WdfRequestSetInformation(Request, reportSize);
 
 exit:
 	TraceEvents(TRACE_LEVEL_INFORMATION, TRACE_HID, "%!FUNC! Exit");
@@ -287,7 +297,7 @@ PtpFilterSetHidFeatures(
 	}
 
 	hidPacket = (PHID_XFER_PACKET)WdfRequestWdmGetIrp(Request)->UserBuffer;
-	if (hidPacket == NULL)
+	if (hidPacket == NULL || hidPacket->reportBuffer == NULL)
 	{
 		status = STATUS_INVALID_DEVICE_REQUEST;
 		goto exit;
@@ -297,26 +307,38 @@ PtpFilterSetHidFeatures(
 	{
 	case REPORTID_REPORTMODE:
 	{
-		TraceEvents(TRACE_LEVEL_INFORMATION, TRACE_HID, "%!FUNC! Report REPORTID_REPORTMODE is requested");
+		PPTP_DEVICE_INPUT_MODE_REPORT deviceInputMode;
 
-		PPTP_DEVICE_INPUT_MODE_REPORT DeviceInputMode = (PPTP_DEVICE_INPUT_MODE_REPORT)hidPacket->reportBuffer;
-		switch (DeviceInputMode->Mode)
+		TraceEvents(TRACE_LEVEL_INFORMATION, TRACE_HID, "%!FUNC! Report REPORTID_REPORTMODE is requested");
+		if (hidPacket->reportBufferLen < sizeof(PTP_DEVICE_INPUT_MODE_REPORT)) {
+			status = STATUS_INVALID_BUFFER_SIZE;
+			goto exit;
+		}
+
+		deviceInputMode = (PPTP_DEVICE_INPUT_MODE_REPORT)hidPacket->reportBuffer;
+		switch (deviceInputMode->Mode)
 		{
 		case PTP_COLLECTION_MOUSE:
 		{
 			TraceEvents(TRACE_LEVEL_INFORMATION, TRACE_HID, "%!FUNC! Report REPORTID_REPORTMODE requested Mouse Input");
+			WdfSpinLockAcquire(deviceContext->TransportStateLock);
 			deviceContext->PtpInputOn = FALSE;
 			amtptp_reset_session(&deviceContext->CoreSession);
+			WdfSpinLockRelease(deviceContext->TransportStateLock);
 			break;
 		}
 		case PTP_COLLECTION_WINDOWS:
 		{
-
 			TraceEvents(TRACE_LEVEL_INFORMATION, TRACE_HID, "%!FUNC! Report REPORTID_REPORTMODE requested Windows PTP Input");
+			WdfSpinLockAcquire(deviceContext->TransportStateLock);
 			deviceContext->PtpInputOn = TRUE;
 			amtptp_reset_session(&deviceContext->CoreSession);
+			WdfSpinLockRelease(deviceContext->TransportStateLock);
 			break;
 		}
+		default:
+			status = STATUS_INVALID_PARAMETER;
+			goto exit;
 		}
 
 		TraceEvents(TRACE_LEVEL_INFORMATION, TRACE_HID, "%!FUNC! Report REPORTID_REPORTMODE is fulfilled");
@@ -324,17 +346,25 @@ PtpFilterSetHidFeatures(
 	}
 	case REPORTID_FUNCSWITCH:
 	{
-		TraceEvents(TRACE_LEVEL_INFORMATION, TRACE_HID, "%!FUNC! Report REPORTID_FUNCSWITCH is requested");
+		PPTP_DEVICE_SELECTIVE_REPORT_MODE_REPORT inputSelection;
 
-		PPTP_DEVICE_SELECTIVE_REPORT_MODE_REPORT InputSelection = (PPTP_DEVICE_SELECTIVE_REPORT_MODE_REPORT)hidPacket->reportBuffer;
-		if (deviceContext->PtpReportTouch != InputSelection->SurfaceReport) {
+		TraceEvents(TRACE_LEVEL_INFORMATION, TRACE_HID, "%!FUNC! Report REPORTID_FUNCSWITCH is requested");
+		if (hidPacket->reportBufferLen < sizeof(PTP_DEVICE_SELECTIVE_REPORT_MODE_REPORT)) {
+			status = STATUS_INVALID_BUFFER_SIZE;
+			goto exit;
+		}
+
+		inputSelection = (PPTP_DEVICE_SELECTIVE_REPORT_MODE_REPORT)hidPacket->reportBuffer;
+		WdfSpinLockAcquire(deviceContext->TransportStateLock);
+		if (deviceContext->PtpReportTouch != inputSelection->SurfaceReport) {
 			amtptp_reset_session(&deviceContext->CoreSession);
 		}
-		deviceContext->PtpReportButton = InputSelection->ButtonReport;
-		deviceContext->PtpReportTouch = InputSelection->SurfaceReport;
+		deviceContext->PtpReportButton = inputSelection->ButtonReport;
+		deviceContext->PtpReportTouch = inputSelection->SurfaceReport;
+		WdfSpinLockRelease(deviceContext->TransportStateLock);
 
 		TraceEvents(TRACE_LEVEL_INFORMATION, TRACE_HID, "%!FUNC! Report REPORTID_FUNCSWITCH requested Button = %d, Surface = %d",
-			InputSelection->ButtonReport, InputSelection->SurfaceReport);
+			inputSelection->ButtonReport, inputSelection->SurfaceReport);
 		TraceEvents(TRACE_LEVEL_INFORMATION, TRACE_HID, "%!FUNC! Report REPORTID_FUNCSWITCH is fulfilled");
 		break;
 	}

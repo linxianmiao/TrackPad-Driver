@@ -26,9 +26,13 @@ PtpFilterIoQueueInitialize(
 
     // First queue for system-wide HID controls
     WDF_IO_QUEUE_CONFIG_INIT_DEFAULT_QUEUE(&queueConfig, WdfIoQueueDispatchParallel);
+    // WdfUseDefault means non-power-managed for a filter. This lower filter is
+    // below the HID function/power-policy owner, so the framework stops this
+    // explicitly power-managed queue before D0Exit. That makes the manual
+    // HID-read queue drain race-free.
+    queueConfig.PowerManaged = WdfTrue;
     WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&queueAttributes, QUEUE_CONTEXT);
     queueConfig.EvtIoInternalDeviceControl = FilterEvtIoIntDeviceControl;
-    queueConfig.EvtIoStop = FilterEvtIoStop;
     status = WdfIoQueueCreate(Device, &queueConfig, &queueAttributes, &queue);
     if (!NT_SUCCESS(status))
     {
@@ -114,16 +118,4 @@ FilterEvtIoIntDeviceControl(
         TraceEvents(TRACE_LEVEL_INFORMATION, TRACE_QUEUE, "%!FUNC!: %s, Status = %!STATUS!", PtpFilterDiagnosticsIoControlGetString(IoControlCode), status);
         WdfRequestComplete(Request, status);
     }
-}
-
-VOID
-FilterEvtIoStop(
-    _In_ WDFQUEUE Queue,
-    _In_ WDFREQUEST Request,
-    _In_ ULONG ActionFlags
-)
-{
-    UNREFERENCED_PARAMETER(Queue);
-    UNREFERENCED_PARAMETER(Request);
-    UNREFERENCED_PARAMETER(ActionFlags);
 }
