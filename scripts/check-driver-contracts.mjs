@@ -136,6 +136,11 @@ assert.match(
   /diagnostics-x64:[\s\S]*?needs:\s*portable-core[\s\S]*?Upload read-only bring-up tools/u,
   `${workflowPath}: diagnostics upload must wait for source contracts`,
 );
+assert.match(
+  workflow,
+  /legacy-compile:[\s\S]*?vs-version:\s*'\[17\.0,18\.0\)'/u,
+  `${workflowPath}: NuGet WDK compile must use compatible MSBuild 17`,
+);
 
 const collectorPath = "scripts/windows/Collect-MagicTrackpadDiagnostics.ps1";
 const collector = readRepositoryFile(collectorPath);

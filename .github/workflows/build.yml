@@ -46,7 +46,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup MSBuild
-        uses: microsoft/setup-msbuild@v2
+        uses: microsoft/setup-msbuild@v3
 
       - name: Build read-only HID capability probe
         run: >-
@@ -94,7 +94,12 @@ jobs:
           path: .tarball/source-${{ steps.create_tarball.outputs.commit_sha }}.tar.gz
 
       - name: Setup MSBuild
-        uses: microsoft/setup-msbuild@v2
+        uses: microsoft/setup-msbuild@v3
+        with:
+          # The NuGet WDK currently ships DriverKit tasks for MSBuild 17.
+          # MSBuild 18 looks for a non-existent *.18.0.dll and fails before
+          # compiling any source, so keep this quarantined compile on VS 2022.
+          vs-version: '[17.0,18.0)'
 
       - name: Restore NuGet Packages
         run: |
