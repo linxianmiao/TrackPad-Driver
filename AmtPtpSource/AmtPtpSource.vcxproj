@@ -57,7 +57,7 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <Import Project="..\packages\Microsoft.Windows.SDK.CPP.10.0.26100.6584\build\native\Microsoft.Windows.SDK.cpp.targets" />
   <Target Name="NoPrototypeSigning" BeforeTargets="PrepareForBuild">
-    <Error Condition="'$(SignMode)' != 'Off'" Text="Prototype signing remains blocked pending transport and lifecycle review." />
+    <Error Condition="'$(SignMode)' != 'Off'" Text="Build unsigned. Authorized local hardware tests use New-MagicPadSourceTestPackage.ps1; production signing is not enabled." />
   </Target>
   <Target Name="ValidateSourceDriverApis" AfterTargets="Build">
     <Exec Command="&quot;$(SourceWdkRoot)bin\10.0.26100.0\x64\apivalidator.exe&quot; -DriverPackagePath:&quot;$(TargetPath)&quot; -SupportedApiXmlFiles:&quot;$(SourceWdkRoot)build\10.0.26100.0\universalDDIs\x64\UniversalDDIs.xml&quot; -ModuleWhiteListXmlFiles:&quot;$(SourceWdkRoot)build\10.0.26100.0\universalDDIs\x64\ModuleWhiteList.xml&quot; -ApiExtractorExePath:&quot;$(SourceWdkRoot)bin\10.0.26100.0\x64&quot;" />

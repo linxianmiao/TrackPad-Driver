@@ -52,7 +52,10 @@ msbuild .\AmtPtpSource\AmtPtpSource.vcxproj /p:Configuration=Release /p:Platform
 项目选择 x64 编译宿主，避免 NuGet x64 WDK 的分析插件被错误地从 x86 目录加载。
 构建结束额外调用匹配架构的 ApiValidator，验证导入的 DDI；KMDF 库与 INF 均固定为 1.15。
 输出为 `AmtPtpSource/build/x64/Release/AmtPtpSource.sys`；默认不签名、不生成 catalog，
-不把 `.inf.in` 当成安装 INF。现有打包暂停没有解除。
+不把 `.inf.in` 当成安装 INF。CI 和旧驱动打包入口继续保持这一限制。
+用户明确授权的本机测试可以使用单独的
+[`New-MagicPadSourceTestPackage.ps1`](../scripts/windows/New-MagicPadSourceTestPackage.ps1)，
+流程见[本机测试准备](source-hardware-test.md)。它只重新构建并签名 `AmtPtpSource`。
 
 Portable core：`make -C core test all`。Windows native-tools 命令行：
 
@@ -68,8 +71,11 @@ core\build\test-source.exe
 ## 实机门禁和当前限制
 
 2026-09-07 本机 Release x64 编译、MSVC `/W4 /WX`、代码分析、Universal DDI 验证和 source 单元测试通过。
-主机注册表报告 `UEFISecureBootEnabled=1`；当前产物未签名，尚未安装或加载。
-没有采集原始坐标 fixture，也没有更改 Secure Boot、测试签名或启动配置。
+主机报告 `UEFISecureBootEnabled=1`；常规构建产物仍未签名。
+用户随后明确授权关闭 Secure Boot、启用测试签名和重启进入本机测试。
+专用测试包已通过 InfVerif `/w`、Inf2Cat、SYS/CAT 签名验证及 catalog 成员验证，
+本机已信任专用测试证书。尚未安装或加载驱动，也没有采集原始坐标 fixture。
+BIOS 和实际运行的测试签名状态须在重启后重新读取，不能由准备脚本或授权推断成功。
 
 安装前需评审 `.inf.in` 的 function-driver 替换和 VHF lower-filter 拓扑。专用原型的
 签名/安装须单独启用，旧驱动打包入口仍保持阻断。必须有可操作的备用输入设备，且明确

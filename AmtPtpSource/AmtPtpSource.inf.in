@@ -1,4 +1,4 @@
-; Reviewed binding proposal only. Not staged, catalogued, signed or installed.
+; Source template. Only New-MagicPadSourceTestPackage.ps1 materializes a test INF.
 ; This source driver owns the HID service's L2CAP channels instead of HidBth.
 [Version]
 Signature="$WINDOWS NT$"
