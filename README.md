@@ -8,6 +8,9 @@ Windows 11 原生 Precision Touchpad（PTP）报告。Windows 接收的是标准
 > Bluetooth 生产路径正在从上游 legacy detour 迁移到 VHF。迁移和实机门禁完成前，
 > 不生成或安装驱动包。仓库不包含可公开分发的 Microsoft 签名。
 
+新的 [Bluetooth L2CAP → VHF 驱动原型](docs/native-ptp-source.md) 已实现于 `AmtPtpSource`，
+包含多点收发、PTP 功能报告和触点释放；尚未实机加载，不能视为可用的手势驱动。
+
 新开发者或 AI 接手请先读 [AI 接手手册](docs/ai-handoff.md)：代码地图、实际实现与目标架构的
 差异、诊断/验证方法、已知坑点及下一阶段任务。
 

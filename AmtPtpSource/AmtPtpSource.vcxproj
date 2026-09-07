@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="..\packages\Microsoft.Windows.SDK.CPP.x64.10.0.26100.6584\build\native\Microsoft.Windows.SDK.cpp.x64.props" />
+  <Import Project="..\packages\Microsoft.Windows.SDK.CPP.10.0.26100.6584\build\native\Microsoft.Windows.SDK.cpp.props" />
+  <Import Project="..\packages\Microsoft.Windows.WDK.x64.10.0.26100.6584\build\native\Microsoft.Windows.WDK.x64.props" />
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Release|x64"><Configuration>Release</Configuration><Platform>x64</Platform></ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{BB0A1AE0-973F-4C81-A8D7-7AC542AD4DEA}</ProjectGuid>
+    <Configuration Condition="'$(Configuration)'==''">Release</Configuration>
+    <Platform Condition="'$(Platform)'==''">x64</Platform>
+    <WindowsTargetPlatformVersion>$(LatestTargetPlatformVersion)</WindowsTargetPlatformVersion>
+    <PreferredToolArchitecture>x64</PreferredToolArchitecture>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>Driver</ConfigurationType>
+    <DriverType>KMDF</DriverType>
+    <PlatformToolset>WindowsKernelModeDriver10.0</PlatformToolset>
+    <TargetVersion>Windows10</TargetVersion>
+    <DriverTargetPlatform>Universal</DriverTargetPlatform>
+    <KmdfVersion>1.15</KmdfVersion>
+    <UseDebugLibraries>false</UseDebugLibraries>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup>
+    <OutDir>$(ProjectDir)build\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(ProjectDir)obj\$(Platform)\$(Configuration)\</IntDir>
+    <SignMode>Off</SignMode>
+    <EnableInf2cat>false</EnableInf2cat>
+    <ApiValidator_Enable>false</ApiValidator_Enable>
+    <!-- The NuGet task selects x86 tools even with an x64 host. Validate with
+         the matching x64 tool explicitly below, instead of skipping the check. -->
+    <SourceWdkRoot>$(ProjectDir)..\packages\Microsoft.Windows.WDK.x64.10.0.26100.6584\c\</SourceWdkRoot>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\core\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <LanguageStandard_C>stdc17</LanguageStandard_C>
+      <WarningLevel>Level4</WarningLevel>
+      <TreatWarningAsError>true</TreatWarningAsError>
+      <WppEnabled>false</WppEnabled>
+    </ClCompile>
+    <Link><AdditionalDependencies>vhfkm.lib;%(AdditionalDependencies)</AdditionalDependencies></Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="Driver.c" />
+    <ClCompile Include="Bluetooth.c" />
+    <ClCompile Include="Vhf.c" />
+    <ClCompile Include="..\core\src\amtptp_core.c" />
+    <ClCompile Include="..\core\src\amtptp_source.c" />
+    <ClInclude Include="Source.h" />
+    <None Include="AmtPtpSource.inf.in" />
+    <None Include="packages.config" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <Import Project="..\packages\Microsoft.Windows.SDK.CPP.10.0.26100.6584\build\native\Microsoft.Windows.SDK.cpp.targets" />
+  <Target Name="NoPrototypeSigning" BeforeTargets="PrepareForBuild">
+    <Error Condition="'$(SignMode)' != 'Off'" Text="Prototype signing remains blocked pending transport and lifecycle review." />
+  </Target>
+  <Target Name="ValidateSourceDriverApis" AfterTargets="Build">
+    <Exec Command="&quot;$(SourceWdkRoot)bin\10.0.26100.0\x64\apivalidator.exe&quot; -DriverPackagePath:&quot;$(TargetPath)&quot; -SupportedApiXmlFiles:&quot;$(SourceWdkRoot)build\10.0.26100.0\universalDDIs\x64\UniversalDDIs.xml&quot; -ModuleWhiteListXmlFiles:&quot;$(SourceWdkRoot)build\10.0.26100.0\universalDDIs\x64\ModuleWhiteList.xml&quot; -ApiExtractorExePath:&quot;$(SourceWdkRoot)bin\10.0.26100.0\x64&quot;" />
+  </Target>
+</Project>

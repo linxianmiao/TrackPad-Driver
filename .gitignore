@@ -3,6 +3,7 @@ bin/
 obj/
 AmtPtpDeviceUsbUm/build/
 AmtPtpHidFilter/build/
+AmtPtpSource/build/
 tools/windows/MagicPadHidProbe/build/
 intermediate/
 build/result/

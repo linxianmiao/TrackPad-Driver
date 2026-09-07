@@ -78,11 +78,22 @@ jobs:
           if errorlevel 1 exit /b 1
           core\build\test-core.exe
           if errorlevel 1 exit /b 1
+          cl /nologo /std:c17 /W4 /WX /O2 /Icore\include core\src\amtptp_core.c core\src\amtptp_source.c core\tests\test_source.c /Focore\build\ /Fecore\build\test-source.exe
+          if errorlevel 1 exit /b 1
+          core\build\test-source.exe
+          if errorlevel 1 exit /b 1
           cl /nologo /std:c17 /W4 /WX /O2 /Icore\include core\src\amtptp_core.c core\tools\amtptp_cli.c /Focore\build\ /Fecore\build\amtptp-cli.exe
           if errorlevel 1 exit /b 1
 
       - name: Test native Windows CLI response flushing
         run: node --test scripts/tests/native-cli.test.mjs
+
+      - name: Validate source status reader without a driver
+        shell: pwsh
+        run: |
+          ./scripts/windows/Read-MagicPadSourceStatus.ps1
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./scripts/windows/Read-MagicPadSourceStatus.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Stage read-only bring-up tools
         shell: bash
@@ -91,13 +102,28 @@ jobs:
           cp tools/windows/MagicPadHidProbe/build/x64/Release/MagicPadHidProbe.exe diagnostics/
           cp scripts/windows/Collect-MagicTrackpadDiagnostics.ps1 diagnostics/
           cp scripts/windows/Test-MagicTrackpadTransport.ps1 diagnostics/
-          (cd diagnostics && sha256sum MagicPadHidProbe.exe Collect-MagicTrackpadDiagnostics.ps1 Test-MagicTrackpadTransport.ps1 > SHA256SUMS.txt)
+          cp scripts/windows/Read-MagicPadSourceStatus.ps1 diagnostics/
+          (cd diagnostics && sha256sum MagicPadHidProbe.exe Collect-MagicTrackpadDiagnostics.ps1 Test-MagicTrackpadTransport.ps1 Read-MagicPadSourceStatus.ps1 > SHA256SUMS.txt)
 
       - name: Upload read-only bring-up tools
         uses: actions/upload-artifact@v4
         with:
           name: magicpad-x64-read-only-diagnostics
           path: diagnostics/
+
+  native-source-x64:
+    name: Compile new Bluetooth VHF source (unsigned)
+    needs: portable-core
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: microsoft/setup-msbuild@v3
+        with:
+          vs-version: '[17.0,18.0)'
+      - name: Restore source driver build dependencies
+        run: nuget restore ./AmtPtpSource/AmtPtpSource.vcxproj -PackagesDirectory ./packages
+      - name: Compile source driver without signing or packaging
+        run: msbuild.exe ./AmtPtpSource/AmtPtpSource.vcxproj -p:Configuration=Release -p:Platform=x64 -p:SignMode=Off -p:RunCodeAnalysis=true
 
   legacy-compile:
     name: Compile quarantined legacy sources

@@ -161,6 +161,19 @@ for (const forbiddenApi of [
     `${preflightPath}: preflight must not issue report I/O or collect serials`);
 }
 
+const sourceHqa = extractDefaultCertificationBlob(readRepositoryFile("core/include/amtptp_hqa.h"), "native source HQA");
+assert.equal(createHash("sha256").update(sourceHqa).digest("hex"), expectedBlobHash);
+const sourceProject = readRepositoryFile("AmtPtpSource/AmtPtpSource.vcxproj");
+assert.match(sourceProject, /<SignMode>Off<\/SignMode>/u);
+assert.match(sourceProject, /<Target Name="ValidateSourceDriverApis"/u);
+assert.doesNotMatch(sourceProject, /Detour\.c|Hac\.h|AmtPtpHidFilter/u);
+for (const path of ["AmtPtpSource/Driver.c", "AmtPtpSource/Bluetooth.c", "AmtPtpSource/Vhf.c", "AmtPtpSource/Source.h"]) {
+  assert.doesNotMatch(readRepositoryFile(path), /MajorFunction\s*\[|#include.*(?:Detour|Hac)\b/u);
+}
+const sourceInf = readRepositoryFile("AmtPtpSource/AmtPtpSource.inf.in");
+const sourceBindings = sourceInf.split("\n").filter((line) => line.startsWith("%DeviceDesc%="));
+assert.deepEqual(sourceBindings, ["%DeviceDesc%=Source,BTHENUM\\{00001124-0000-1000-8000-00805f9b34fb}_VID&0001004C_PID&0324"]);
+
 const packageScriptPath = "scripts/windows/New-TestSignedPackage.ps1";
 const packageScript = readRepositoryFile(packageScriptPath);
 assert.match(
