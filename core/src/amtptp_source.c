@@ -1,4 +1,15 @@
 #include "amtptp_source.h"
+
+int amtptp_source_battery(const amtptp_u8 *sdu, amtptp_size length,
+    amtptp_u8 *percent, amtptp_u8 *flags)
+{
+    if (!sdu || !percent || !flags || length != 4 ||
+        sdu[0] != AMTPTP_HIDP_INPUT || sdu[1] != 0x90 || sdu[3] > 100)
+        return AMTPTP_SOURCE_INVALID;
+    *percent = sdu[3];
+    *flags = sdu[2];
+    return AMTPTP_SOURCE_REPORT;
+}
 #include "amtptp_hqa.h"
 
 /* HIDP SET_REPORT(feature), Apple report F1, multitouch mode. */

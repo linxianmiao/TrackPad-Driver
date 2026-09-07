@@ -103,7 +103,8 @@ jobs:
           cp scripts/windows/Collect-MagicTrackpadDiagnostics.ps1 diagnostics/
           cp scripts/windows/Test-MagicTrackpadTransport.ps1 diagnostics/
           cp scripts/windows/Read-MagicPadSourceStatus.ps1 diagnostics/
-          (cd diagnostics && sha256sum MagicPadHidProbe.exe Collect-MagicTrackpadDiagnostics.ps1 Test-MagicTrackpadTransport.ps1 Read-MagicPadSourceStatus.ps1 > SHA256SUMS.txt)
+          cp tools/windows/MagicPadSourceStatus/SourceStatus.cs diagnostics/
+          (cd diagnostics && sha256sum MagicPadHidProbe.exe Collect-MagicTrackpadDiagnostics.ps1 Test-MagicTrackpadTransport.ps1 Read-MagicPadSourceStatus.ps1 SourceStatus.cs > SHA256SUMS.txt)
 
       - name: Upload read-only bring-up tools
         uses: actions/upload-artifact@v4

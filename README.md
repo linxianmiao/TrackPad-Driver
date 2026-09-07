@@ -13,6 +13,9 @@ Windows 11 原生 Precision Touchpad（PTP）报告。Windows 接收的是标准
 用户已确认单指移动、按压点击、双指滚动/缩放、三指任务视图/桌面/窗口切换和四指桌面切换正常。
 睡眠唤醒、断连重连、卸载恢复及 Verifier 等稳定性测试仍待完成。
 
+电量直接显示在 [Windows 设置的蓝牙设备列表](docs/battery-display.md) 中；驱动每分钟
+读取实际百分比，断连或读数过期时清除。无需单独弹窗、托盘程序或 Magic Utilities。
+
 新开发者或 AI 接手请先读 [AI 接手手册](docs/ai-handoff.md)：代码地图、实际实现与目标架构的
 差异、诊断/验证方法、已知坑点及下一阶段任务。
 

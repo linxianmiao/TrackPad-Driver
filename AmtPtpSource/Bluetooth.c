@@ -226,6 +226,7 @@ VOID SourceThread(PVOID StartContext)
         InterlockedExchange(&context->Status.TransportStage, SourceStageInput);
         while (!Stopping(context) && !InterlockedCompareExchange(&context->Disconnected, 0, 0)) {
             amtptp_raw_frame validated;
+            SourceBatteryPump(context);
             SourceVhfReleaseTouches(context, TRUE);
             length = sizeof(context->ReceiveBuffer);
             status = Transfer(context, context->InterruptChannel, context->ReceiveBuffer, &length, TRUE, 500);
@@ -233,6 +234,7 @@ VOID SourceThread(PVOID StartContext)
             if (status != STATUS_SUCCESS) break;
             if (Stopping(context)) break;
             InterlockedIncrement(&context->Status.Packets);
+            if (SourceBatteryInput(context, context->ReceiveBuffer, length)) continue;
             if (length >= 2 && context->ReceiveBuffer[0] == AMTPTP_HIDP_INPUT &&
                 amtptp_decode_mt2(context->ReceiveBuffer + 1, length - 1, &validated) == AMTPTP_OK) {
                 /* A successful write/handshake alone is not mode evidence. */
@@ -243,6 +245,9 @@ VOID SourceThread(PVOID StartContext)
             SourceVhfInput(context, context->ReceiveBuffer, length);
         }
 Disconnect:
+        /* The independent control query must complete before either channel
+         * is closed. It never borrows the touch request, BRB, or receive buffer. */
+        SourceBatteryStop(context);
         InterlockedExchange(&context->Status.LastStatus, status);
         SourceVhfReleaseTouches(context, FALSE);
         InterlockedExchange(&context->Status.ModeEnabled, 0);

@@ -53,13 +53,19 @@ NTSTATUS SourceDeviceAdd(WDFDRIVER Driver, PWDFDEVICE_INIT DeviceInit)
     KeInitializeEvent(&context->CompletedEvent, NotificationEvent, FALSE);
     amtptp_source_init(&context->Core);
     context->Status.Size = sizeof(SOURCE_STATUS);
-    context->Status.Version = 2;
+    context->Status.Version = 5;
     context->Status.HandshakeCode = -1;
+    context->Status.BatteryPercent = -1;
+    context->Status.BatteryFlags = -1;
+    context->Status.BatteryAgeSeconds = -1;
+    context->Status.BatteryPropertyPercent = -1;
     WDF_OBJECT_ATTRIBUTES_INIT(&attributes);
     attributes.ParentObject = device;
     status = WdfRequestCreate(&attributes, context->Target, &context->Request);
     if (!NT_SUCCESS(status)) return status;
     status = WdfMemoryCreatePreallocated(&attributes, &context->Brb, sizeof(context->Brb), &context->BrbMemory);
+    if (!NT_SUCCESS(status)) return status;
+    status = SourceBatteryCreate(context);
     if (!NT_SUCCESS(status)) return status;
     WDF_IO_QUEUE_CONFIG_INIT_DEFAULT_QUEUE(&queue, WdfIoQueueDispatchSequential);
     queue.EvtIoDeviceControl = SourceDeviceControl;
@@ -115,6 +121,7 @@ VOID SourceDeviceControl(WDFQUEUE Queue, WDFREQUEST Request, size_t OutLength,
     result->InputMode = context->Core.input_mode;
     result->SurfaceEnabled = context->Core.surface_enabled;
     result->ButtonEnabled = context->Core.button_enabled;
+    SourceBatterySnapshot(context, result);
     KeReleaseSpinLock(&context->StateLock, irql);
     WdfRequestCompleteWithInformation(Request, STATUS_SUCCESS, sizeof(*result));
 }

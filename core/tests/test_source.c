@@ -154,10 +154,35 @@ static void descriptor(void)
     CHECK(sizeof(amtptp_enable_multitouch) == 4 && amtptp_enable_multitouch[0] == 0x53 && amtptp_enable_multitouch[1] == 0xf1);
 }
 
+static void battery_reports(void)
+{
+    unsigned char report[] = {0xa1,0x90,4,95};
+    unsigned char percent = 123, flags = 123;
+    unsigned value;
+    CHECK(amtptp_source_battery(report, 4, &percent, &flags) == 1);
+    CHECK(percent == 95 && flags == 4); /* Never mistake the status byte for 4%. */
+    for (value = 0; value <= 255; ++value) {
+        report[3] = (unsigned char)value;
+        percent = 123;
+        CHECK(amtptp_source_battery(report, 4, &percent, &flags) == (value <= 100 ? 1 : -1));
+        CHECK(percent == (value <= 100 ? value : 123));
+    }
+    report[3] = 80;
+    CHECK(amtptp_source_battery(report, 0, &percent, &flags) == -1);
+    CHECK(amtptp_source_battery(report, 3, &percent, &flags) == -1);
+    CHECK(amtptp_source_battery(report, 5, &percent, &flags) == -1);
+    CHECK(amtptp_source_battery(NULL, 4, &percent, &flags) == -1);
+    CHECK(amtptp_source_battery(report, 4, NULL, &flags) == -1);
+    report[0] = 0xb1;
+    CHECK(amtptp_source_battery(report, 4, &percent, &flags) == -1);
+    report[0] = 0xa1; report[1] = 0x31;
+    CHECK(amtptp_source_battery(report, 4, &percent, &flags) == -1);
+}
+
 int main(void)
 {
-    features(); gesture_contacts(); interruptions(); descriptor();
+    features(); gesture_contacts(); interruptions(); descriptor(); battery_reports();
     if (failures) return 1;
-    puts("All native PTP source tests passed (features, 2-5 contacts, lift, disconnect, selective reporting, framing, descriptor).");
+    puts("All native PTP source tests passed (features, 2-5 contacts, lift, disconnect, selective reporting, framing, descriptor, battery).");
     return 0;
 }

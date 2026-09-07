@@ -19,7 +19,36 @@ typedef struct SOURCE_STATUS {
     /* v2 tail: protocol state only, never report payloads or device addresses. */
     LONG TransportStage, FailureStage, FailureBrbStatus, FailureBtStatus, FailureBrbType;
     LONG ControlOpens, InterruptOpens, FeatureWrites, HandshakeCode;
+    /* v3: unknown/stale/disconnected percent is -1, never a fabricated 0%. */
+    LONG BatteryValid, BatteryPercent, BatteryFlags, BatteryAgeSeconds;
+    LONG BatteryReports, BatteryQueries, BatteryLastStatus;
+    LONG BatteryWriteStatus, BatteryReadStatus, BatteryReadLength, BatteryReadRemaining;
+    ULONG BatteryResponse; /* Only an A1 90 battery response, never touch data. */
+    /* v5: native Bluetooth device property publishing, independent of I/O. */
+    LONG BatteryPropertyStatus, BatteryPropertyPercent, BatteryPropertyUpdates;
 } SOURCE_STATUS;
+C_ASSERT(sizeof(SOURCE_STATUS) == 148);
+
+typedef struct SOURCE_BATTERY_IO {
+    WDFREQUEST Request;
+    WDFMEMORY Memory;
+    BRB Brb;
+    WDFREQUEST WriteRequest;
+    WDFMEMORY WriteMemory;
+    BRB WriteBrb;
+    KEVENT WriteCompleted;
+    NTSTATUS WriteStatus;
+    BOOLEAN WritePending;
+    UCHAR Command[2];
+    KEVENT Completed;
+    NTSTATUS CompletionStatus;
+    ULONG Reads;
+    BOOLEAN Pending;
+    ULONGLONG NextQuery, Deadline, UpdatedAt;
+    ULONGLONG PropertyRetryAt;
+    BOOLEAN PropertyInitialized;
+    UCHAR Buffer[SOURCE_MTU];
+} SOURCE_BATTERY_IO;
 
 enum SOURCE_TRANSPORT_STAGE {
     SourceStageIdle, SourceStageControl, SourceStageInterrupt, SourceStageModeWrite,
@@ -41,6 +70,7 @@ typedef struct SOURCE_CONTEXT {
     NTSTATUS CompletionStatus;
     volatile LONG Disconnected;
     SOURCE_STATUS Status;
+    SOURCE_BATTERY_IO Battery;
     KSPIN_LOCK StateLock;
     amtptp_source Core;
     VHFHANDLE Vhf;
@@ -56,3 +86,8 @@ NTSTATUS SourceVhfCreate(SOURCE_CONTEXT *Context);
 VOID SourceVhfDelete(SOURCE_CONTEXT *Context);
 VOID SourceVhfInput(SOURCE_CONTEXT *Context, const UCHAR *Buffer, ULONG Length);
 VOID SourceVhfReleaseTouches(SOURCE_CONTEXT *Context, BOOLEAN OnlyIfPending);
+NTSTATUS SourceBatteryCreate(SOURCE_CONTEXT *Context);
+VOID SourceBatteryPump(SOURCE_CONTEXT *Context);
+VOID SourceBatteryStop(SOURCE_CONTEXT *Context);
+BOOLEAN SourceBatteryInput(SOURCE_CONTEXT *Context, const UCHAR *Buffer, ULONG Length);
+VOID SourceBatterySnapshot(SOURCE_CONTEXT *Context, SOURCE_STATUS *Status);

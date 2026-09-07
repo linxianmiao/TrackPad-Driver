@@ -40,4 +40,8 @@ int amtptp_source_input(amtptp_source *source, const amtptp_u8 *sdu,
 /* Releases preserve IDs/positions before an empty frame, preventing stuck touches. */
 void amtptp_source_release(amtptp_source *source, amtptp_report_batch *batch);
 int amtptp_source_handshake(const amtptp_u8 *sdu, amtptp_size length);
+/* Complete HIDP DATA/Input 0x90: [A1][90][status][percent]. Status flags
+ * are retained as raw data; their charging interpretation is not assumed. */
+int amtptp_source_battery(const amtptp_u8 *sdu, amtptp_size length,
+    amtptp_u8 *percent, amtptp_u8 *flags);
 #endif

@@ -47,6 +47,7 @@
   <ItemGroup>
     <ClCompile Include="Driver.c" />
     <ClCompile Include="Bluetooth.c" />
+    <ClCompile Include="Battery.c" />
     <ClCompile Include="Vhf.c" />
     <ClCompile Include="..\core\src\amtptp_core.c" />
     <ClCompile Include="..\core\src\amtptp_source.c" />

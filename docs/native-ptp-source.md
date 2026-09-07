@@ -21,15 +21,20 @@ BTHENUM 的特定 Apple HID service
 HID service 不匹配其 INF。它不修改物理描述符，也不改写任何共享驱动派发表。
 原有 `AmtPtpHidFilter` 保持隔离，新工程不链接它的 detour、私有结构或收发代码。
 
-- `Driver.c`：PnP、自管 I/O 生命周期和只含计数的状态接口。
+- `Driver.c`：PnP、自管 I/O 生命周期和计数/电量状态接口。
 - `Bluetooth.c`：通过公开 BTH profile interface 提交 BRB。运行时再次验证 HID service
   UUID、VidType、VID/PID；地址仅保存在内存中。所有连接要求链路加密。
 - `Vhf.c`：VHF 创建/删除，GET/SET_FEATURE 回调和默认输入缓冲。每个 feature operation
   完成一次；回调不发蓝牙请求。
 - `core/src/amtptp_source.c`：HIDP 帧校验、完整 256 字节 HQA、输入模式、触摸/按钮开关、
   2–5 指报告与触点释放。手势识别交给 Windows，没有鼠标快捷键模拟。
+- `Battery.c`：独立的异步 control 请求，每分钟 GET Input `0x90`；也接受 interrupt
+  通道主动发送的完整电量帧，并在被动级将真实百分比发布给系统蓝牙列表。
+  断连/过期时清除属性。详见[电量显示](battery-display.md)。
 
-每个设备只有一个生产线程、一个 BRB 请求和一个接收缓冲；不会并发重复投递 read。
+每个设备只有一个生产线程；触点链独占一个 BRB 请求和接收缓冲。电量查询另有独立的
+读写请求、BRB、缓冲和完成事件；先挂起 control read 再异步发送查询，可与触点读取
+并行，不会在同一通道重复投递 read。
 停止时设置事件，取消在途请求并等待 completion，再关闭通道、等待线程结束、删除 VHF。
 中断通道使用流式 ACL read；500 ms 无数据超时用于处理停止/配置，不是 GET_INPUT_REPORT
 轮询。断连释放保留旧 Contact ID/位置、清除 Tip/Button，再发空帧，随后重置 session。
@@ -101,6 +106,13 @@ core\build\test-source.exe
 状态 v2 为 88 字节，保留原有 52 字节前缀并增加 transport stage、最后失败 BRB 的
 NTSTATUS/Bluetooth status/type、成功打开通道与模式写入计数、握手字节（缺失为 -1）。
 新读取器也能读取 v1 驱动；v1 没有传输诊断尾部，不能解释其补零字段。
+状态 v3 为 116 字节，继续保留 v2 前缀，增加有效性、百分比、原始状态字节、读数年龄、
+电量报告/查询计数和电量请求错误。读取器兼容 v1/v2，并把缺失的电量明确标为未知。
+v4 为 136 字节，增加电量请求的读/写状态、返回长度/剩余长度以及经过 `A1 90`
+筛选的四字节诊断值；失败缓冲仅用于诊断，不作为有效电量。读取器也兼容 v3。
+v5 为 148 字节，增加 `BatteryPropertyStatus/Percent/Updates`，区分读取电量与
+向 Windows 发布电量的结果。属性设置失败不会关闭触控连接，每分钟重试。
+读取器兼容 v1–v4；旧版本没有发布诊断，补零字段不代表成功发布。
 Stage 值：0 idle、1 control open、2 interrupt open、3 mode write、4 handshake read、
 5 input read、6 close、7 retry、8 stopped。失败历史不会被成功关闭通道覆盖。
 
