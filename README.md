@@ -8,6 +8,9 @@ Windows 11 原生 Precision Touchpad（PTP）报告。Windows 接收的是标准
 > Bluetooth 生产路径正在从上游 legacy detour 迁移到 VHF。迁移和实机门禁完成前，
 > 不生成或安装驱动包。仓库不包含可公开分发的 Microsoft 签名。
 
+新开发者或 AI 接手请先读 [AI 接手手册](docs/ai-handoff.md)：代码地图、实际实现与目标架构的
+差异、诊断/验证方法、已知坑点及下一阶段任务。
+
 ## 已实现
 
 - Bluetooth 优先：已识别 Apple Bluetooth VID `0x004c`、PID `0x0265` / `0x0324`；
