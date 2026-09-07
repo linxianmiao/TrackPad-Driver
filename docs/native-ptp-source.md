@@ -76,8 +76,9 @@ core\build\test-source.exe
 专用测试包已通过 InfVerif `/w`、Inf2Cat、SYS/CAT 签名验证及 catalog 成员验证，
 本机已信任专用测试证书。2026-09-08 已关闭 Secure Boot，核实运行内核的 TESTSIGN
 位已开启，C、D 盘保护均已恢复，并安装加载了专用原型。PnP 状态为 OK；VHF 的触摸板
-和 MTConfig 子设备正常枚举，Windows 设置了 `InputMode=3`。还没有真实触点/手势验收，
-也没有采集原始坐标 fixture。
+和 MTConfig 子设备正常枚举，Windows 设置了 `InputMode=3`。已接收真实触点，用户随后
+确认单指移动、按压点击、双指滚动、捏合/张开缩放正常。三/四指和生命周期验收待完成；
+没有采集原始坐标 fixture。
 
 安装前需评审 `.inf.in` 的 function-driver 替换和 VHF lower-filter 拓扑。专用原型的
 签名/安装须单独启用，旧驱动打包入口仍保持阻断。必须有可操作的备用输入设备，且明确
@@ -106,8 +107,11 @@ Stage 值：0 idle、1 control open、2 interrupt open、3 mode write、4 handsh
 `STATUS_IO_TIMEOUT (0xC00000B5)`。版本 0.2.0.2 在这个确切超时分支继续等待 interrupt
 输入，避免反复拆连接；这是一项由本机观察引入的原型处理，不是声称 Linux 已证明该行为。
 超时缓冲不会被解析，明确错误应答仍拒绝；只有真实有效的 `A1 31` 才设置 `ModeEnabled`。
-更新后观察到 `Connected=1`、Stage=5、蓝牙数据计数增加，但 `TouchPackets=0`，
-用户暂时无法操作设备，仍需通过实际触摸验证模式切换与手势。
+更新后的首轮空闲观察尚无触点。用户实际触摸后，先观察到 579 个有效触点报告，
+在用户确认基本操作正常后增至 `TouchPackets=Reports=2887`，`ModeEnabled=1`、
+`LastStatus=0`、`InvalidPackets=0`，`Reconnects` 保持为 1。此证据确认真实 `A1 31`
+到 PTP 的数据链，结合用户反馈确认基本移动/点击与双指滚动/缩放；不能据此推断三/四指
+或断连恢复已通过。`FailureStage=4` 仍保留最初缺失握手的历史，不代表当前输入失败。
 
 当前实现仅主动建立连接，每两秒尝试重连；没有注册全局 HID PSM server，因此设备主动
 重连与其他 HID profile 共存尚待实机验证。固定使用标准 HID PSM 和 basic L2CAP，

@@ -2,14 +2,18 @@
 
 这是独立 Bluetooth source 原型的本机测试流程，用户已明确授权该次测试。
 旧 `New-TestSignedPackage.ps1`、Detour/private-layout 工程保持隔离。
-测试包不会上传 GitHub；CI 仍只编译 unsigned source。原型已加载，手势尚未实机验收。
+测试包不会上传 GitHub；CI 仍只编译 unsigned source。原型已加载，基本指针和双指手势已实测。
 
 2026-09-08 运行状态：Secure Boot 已关闭，当前内核 TESTSIGN 位已确认，C、D 盘的
 BitLocker 保护均为开启。已安装的当前版本为 0.2.0.2，专用 source 和 VHF 子设备
 状态正常，`InputMode=3`。两条蓝牙通道和模式命令写入成功，设备应答缺失；现允许在
-该超时之后等待真实 interrupt 触点数据。当前有蓝牙数据到达，但没有 `A1 31` 证据。
-用户暂时不能触摸设备，下一步是用户操作时同时观察 `TouchPackets`、`ModeEnabled`
-和 `Reports`，再验证双指、三指、四指功能。
+该超时之后等待真实 interrupt 触点数据。实际触摸后已确认 `A1 31` 到 PTP 的路径，
+`ModeEnabled=1`、`InputMode=3`、`LastStatus=0`。在用户反馈时读取到
+`TouchPackets=Reports=2887`，`InvalidPackets=0`，`Reconnects` 仍为 1。
+
+本轮用户逐项测试范围为单指移动/按压点击、浏览器长网页的双指滚动、双指捏合/张开，
+用户回复“正常”，因此这四项记为用户确认通过。三指上/下/左右、四指桌面切换仍待反馈，
+睡眠/唤醒、禁用/启用、断连/重连、卸载恢复与 Verifier 尚未验收。
 
 ## 已完成
 

@@ -5,12 +5,12 @@ Windows 11 原生 Precision Touchpad（PTP）报告。Windows 接收的是标准
 滚动、缩放、三指/四指手势仍由系统手势栈处理。
 
 > 当前状态：协议 bring-up。macOS 模拟器、共享转换核心和 Windows 只读诊断工具可用；
-> Bluetooth 生产路径正在从上游 legacy detour 迁移到 VHF。迁移和实机门禁完成前，
-> 不生成或安装驱动包。仓库不包含可公开分发的 Microsoft 签名。
+> Bluetooth 生产路径正在从上游 legacy detour 迁移到 VHF。旧驱动打包保持隔离，
+> 新 source 原型仅通过专用入口开展明确授权的本机测试。仓库不包含可公开分发的 Microsoft 签名。
 
 新的 [Bluetooth L2CAP → VHF 驱动原型](docs/native-ptp-source.md) 已实现于 `AmtPtpSource`，
-包含多点收发、PTP 功能报告和触点释放；已在本机加载并枚举为 PTP，蓝牙通道已接通，
-真实触点与手势仍待验证，不能视为已可用的手势驱动。
+包含多点收发、PTP 功能报告和触点释放；已在本机接收真实触点并向 Windows 上报。
+用户已确认单指移动、按压点击、双指滚动与缩放正常；三/四指和生命周期测试仍待完成。
 
 新开发者或 AI 接手请先读 [AI 接手手册](docs/ai-handoff.md)：代码地图、实际实现与目标架构的
 差异、诊断/验证方法、已知坑点及下一阶段任务。
