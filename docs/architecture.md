@@ -2,7 +2,8 @@
 
 > 新实现位于 `AmtPtpSource`，采用专用 L2CAP function driver + VHF；见
 > [实现及验证边界](native-ptp-source.md)。下文 A/B 为历史 collection 原型候选，
-> 当前新工程不沿用其 collection 读路径，也尚未取得实机加载证据。
+> 当前新工程不沿用其 collection 读路径；已取得本机加载、PTP 枚举和蓝牙建链证据，
+> 真实触点报告与手势仍待验证。
 
 > 2026-09-07 实机更新：系统驱动下 `004c:0324` 的 Col01 仅声明 8 字节鼠标输入，
 > Col02 仅声明 3 字节 `0x90`，没有声明 `0x31`；用户态 Col01 读句柄被拒绝。

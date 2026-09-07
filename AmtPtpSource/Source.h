@@ -16,7 +16,15 @@ typedef struct SOURCE_STATUS {
     LONG Connected, ModeEnabled, LastStatus;
     LONG Packets, TouchPackets, InvalidPackets, Reports, Reconnects;
     ULONG InputMode, SurfaceEnabled, ButtonEnabled;
+    /* v2 tail: protocol state only, never report payloads or device addresses. */
+    LONG TransportStage, FailureStage, FailureBrbStatus, FailureBtStatus, FailureBrbType;
+    LONG ControlOpens, InterruptOpens, FeatureWrites, HandshakeCode;
 } SOURCE_STATUS;
+
+enum SOURCE_TRANSPORT_STAGE {
+    SourceStageIdle, SourceStageControl, SourceStageInterrupt, SourceStageModeWrite,
+    SourceStageHandshake, SourceStageInput, SourceStageClose, SourceStageRetry, SourceStageStopped
+};
 
 typedef struct SOURCE_CONTEXT {
     WDFDEVICE Device;

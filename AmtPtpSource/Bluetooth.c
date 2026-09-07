@@ -26,24 +26,38 @@ static NTSTATUS SendBrb(SOURCE_CONTEXT *Context, size_t Size, ULONG TimeoutMs, B
     NTSTATUS status;
     WDF_REQUEST_REUSE_PARAMS_INIT(&reuse, WDF_REQUEST_REUSE_NO_FLAGS, STATUS_UNSUCCESSFUL);
     status = WdfRequestReuse(Context->Request, &reuse);
-    if (!NT_SUCCESS(status)) return status;
+    if (!NT_SUCCESS(status)) goto Finished;
     offset.BufferOffset = 0;
     offset.BufferLength = Size;
     status = WdfIoTargetFormatRequestForInternalIoctlOthers(Context->Target, Context->Request,
         IOCTL_INTERNAL_BTH_SUBMIT_BRB, Context->BrbMemory, &offset, NULL, NULL, NULL, NULL);
-    if (!NT_SUCCESS(status)) return status;
+    if (!NT_SUCCESS(status)) goto Finished;
     KeClearEvent(&Context->CompletedEvent);
     WdfRequestSetCompletionRoutine(Context->Request, SourceBrbComplete, Context);
     WDF_REQUEST_SEND_OPTIONS_INIT(&options, WDF_REQUEST_SEND_OPTION_TIMEOUT);
     WDF_REQUEST_SEND_OPTIONS_SET_TIMEOUT(&options, WDF_REL_TIMEOUT_IN_MS(TimeoutMs));
-    if (!WdfRequestSend(Context->Request, Context->Target, &options)) return WdfRequestGetStatus(Context->Request);
+    if (!WdfRequestSend(Context->Request, Context->Target, &options)) {
+        status = WdfRequestGetStatus(Context->Request);
+        goto Finished;
+    }
     status = KeWaitForMultipleObjects(StopSensitive ? 2 : 1, events, WaitAny,
         Executive, KernelMode, FALSE, NULL, NULL);
     if (status == STATUS_WAIT_1) {
         (void)WdfRequestCancelSentRequest(Context->Request);
         (void)KeWaitForSingleObject(&Context->CompletedEvent, Executive, KernelMode, FALSE, NULL);
     }
-    return Context->CompletionStatus;
+    status = Context->CompletionStatus;
+Finished:
+    /* Successful cleanup must not overwrite the failing request's details.
+     * An ordinary empty interrupt read is not a transport failure. */
+    if (status != STATUS_SUCCESS && !(Context->Status.TransportStage == SourceStageInput &&
+        (status == STATUS_TIMEOUT || status == STATUS_IO_TIMEOUT))) {
+        InterlockedExchange(&Context->Status.FailureStage, Context->Status.TransportStage);
+        InterlockedExchange(&Context->Status.FailureBrbStatus, Context->Brb.BrbHeader.Status);
+        InterlockedExchange(&Context->Status.FailureBtStatus, Context->Brb.BrbHeader.BtStatus);
+        InterlockedExchange(&Context->Status.FailureBrbType, Context->Brb.BrbHeader.Type);
+    }
+    return status;
 }
 
 static VOID InitBrb(SOURCE_CONTEXT *Context, BRB_TYPE Type)
@@ -175,22 +189,41 @@ VOID SourceThread(PVOID StartContext)
     retry.QuadPart = -20000000LL; /* Two seconds, interruptible by StopEvent. */
     while (!Stopping(context)) {
         InterlockedExchange(&context->Disconnected, 0);
+        InterlockedExchange(&context->Status.TransportStage, SourceStageControl);
+        InterlockedExchange(&context->Status.HandshakeCode, -1);
         status = OpenChannel(context, 0x11, &context->ControlChannel);
         if (status != STATUS_SUCCESS || Stopping(context)) goto Disconnect;
+        InterlockedIncrement(&context->Status.ControlOpens);
+        InterlockedExchange(&context->Status.TransportStage, SourceStageInterrupt);
         status = OpenChannel(context, 0x13, &context->InterruptChannel);
         if (status != STATUS_SUCCESS || Stopping(context)) goto Disconnect;
+        InterlockedIncrement(&context->Status.InterruptOpens);
         InterlockedExchange(&context->Status.Connected, 1);
+        InterlockedExchange(&context->Status.TransportStage, SourceStageModeWrite);
         RtlCopyMemory(command, amtptp_enable_multitouch, sizeof(command));
         length = sizeof(command);
         status = Transfer(context, context->ControlChannel, command, &length, FALSE, 2000);
         if (status != STATUS_SUCCESS || Stopping(context)) goto Disconnect;
+        InterlockedIncrement(&context->Status.FeatureWrites);
+        InterlockedExchange(&context->Status.TransportStage, SourceStageHandshake);
         length = sizeof(context->ReceiveBuffer);
         status = Transfer(context, context->ControlChannel, context->ReceiveBuffer, &length, TRUE, 2000);
-        if (status != STATUS_SUCCESS) goto Disconnect;
-        if (!amtptp_source_handshake(context->ReceiveBuffer, length)) {
-            status = STATUS_DEVICE_PROTOCOL_ERROR;
-            goto Disconnect;
+        if (status == STATUS_TIMEOUT || status == STATUS_IO_TIMEOUT) {
+            /* Observed on this 0324: both channels and the write succeed, but
+             * no control response arrives. Keep the interrupt stream open to
+             * obtain actual mode evidence instead of a reconnect loop. Never
+             * interpret the timed-out receive buffer or set ModeEnabled here. */
+            InterlockedExchange(&context->Status.LastStatus, status);
+        } else {
+            if (status != STATUS_SUCCESS) goto Disconnect;
+            if (length == 1) InterlockedExchange(&context->Status.HandshakeCode, context->ReceiveBuffer[0]);
+            if (!amtptp_source_handshake(context->ReceiveBuffer, length)) {
+                status = STATUS_DEVICE_PROTOCOL_ERROR;
+                InterlockedExchange(&context->Status.FailureStage, SourceStageHandshake);
+                goto Disconnect;
+            }
         }
+        InterlockedExchange(&context->Status.TransportStage, SourceStageInput);
         while (!Stopping(context) && !InterlockedCompareExchange(&context->Disconnected, 0, 0)) {
             amtptp_raw_frame validated;
             SourceVhfReleaseTouches(context, TRUE);
@@ -204,6 +237,7 @@ VOID SourceThread(PVOID StartContext)
                 amtptp_decode_mt2(context->ReceiveBuffer + 1, length - 1, &validated) == AMTPTP_OK) {
                 /* A successful write/handshake alone is not mode evidence. */
                 InterlockedExchange(&context->Status.ModeEnabled, 1);
+                InterlockedExchange(&context->Status.LastStatus, STATUS_SUCCESS);
                 InterlockedIncrement(&context->Status.TouchPackets);
             }
             SourceVhfInput(context, context->ReceiveBuffer, length);
@@ -213,6 +247,7 @@ Disconnect:
         SourceVhfReleaseTouches(context, FALSE);
         InterlockedExchange(&context->Status.ModeEnabled, 0);
         InterlockedExchange(&context->Status.Connected, 0);
+        InterlockedExchange(&context->Status.TransportStage, SourceStageClose);
         closeStatus = CloseChannel(context, &context->InterruptChannel);
         if (closeStatus != STATUS_SUCCESS) InterlockedExchange(&context->Status.LastStatus, closeStatus);
         closeStatus = CloseChannel(context, &context->ControlChannel);
@@ -221,9 +256,11 @@ Disconnect:
         if (context->ControlChannel != NULL || context->InterruptChannel != NULL) break;
         if (Stopping(context)) break;
         InterlockedIncrement(&context->Status.Reconnects);
+        InterlockedExchange(&context->Status.TransportStage, SourceStageRetry);
         (void)KeWaitForSingleObject(&context->StopEvent, Executive, KernelMode, FALSE, &retry);
     }
     RtlSecureZeroMemory(context->ReceiveBuffer, sizeof(context->ReceiveBuffer));
+    InterlockedExchange(&context->Status.TransportStage, SourceStageStopped);
     PsTerminateSystemThread(STATUS_SUCCESS);
 }
 

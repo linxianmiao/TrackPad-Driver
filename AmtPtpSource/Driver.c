@@ -53,7 +53,8 @@ NTSTATUS SourceDeviceAdd(WDFDRIVER Driver, PWDFDEVICE_INIT DeviceInit)
     KeInitializeEvent(&context->CompletedEvent, NotificationEvent, FALSE);
     amtptp_source_init(&context->Core);
     context->Status.Size = sizeof(SOURCE_STATUS);
-    context->Status.Version = 1;
+    context->Status.Version = 2;
+    context->Status.HandshakeCode = -1;
     WDF_OBJECT_ATTRIBUTES_INIT(&attributes);
     attributes.ParentObject = device;
     status = WdfRequestCreate(&attributes, context->Target, &context->Request);

@@ -74,8 +74,10 @@ core\build\test-source.exe
 主机报告 `UEFISecureBootEnabled=1`；常规构建产物仍未签名。
 用户随后明确授权关闭 Secure Boot、启用测试签名和重启进入本机测试。
 专用测试包已通过 InfVerif `/w`、Inf2Cat、SYS/CAT 签名验证及 catalog 成员验证，
-本机已信任专用测试证书。尚未安装或加载驱动，也没有采集原始坐标 fixture。
-BIOS 和实际运行的测试签名状态须在重启后重新读取，不能由准备脚本或授权推断成功。
+本机已信任专用测试证书。2026-09-08 已关闭 Secure Boot，核实运行内核的 TESTSIGN
+位已开启，C、D 盘保护均已恢复，并安装加载了专用原型。PnP 状态为 OK；VHF 的触摸板
+和 MTConfig 子设备正常枚举，Windows 设置了 `InputMode=3`。还没有真实触点/手势验收，
+也没有采集原始坐标 fixture。
 
 安装前需评审 `.inf.in` 的 function-driver 替换和 VHF lower-filter 拓扑。专用原型的
 签名/安装须单独启用，旧驱动打包入口仍保持阻断。必须有可操作的备用输入设备，且明确
@@ -93,6 +95,19 @@ BIOS 和实际运行的测试签名状态须在重启后重新读取，不能由
 加载后可运行 `pwsh -File scripts/windows/Read-MagicPadSourceStatus.ps1` 读取连接、输入模式、
 收包/触点包/上报计数和最后错误。它只调用新驱动的固定状态 IOCTL，不返回设备地址或坐标。
 `sourceNotPresent` 表示没有发现活动 source 接口，不能解读成硬件不兼容。
+
+状态 v2 为 88 字节，保留原有 52 字节前缀并增加 transport stage、最后失败 BRB 的
+NTSTATUS/Bluetooth status/type、成功打开通道与模式写入计数、握手字节（缺失为 -1）。
+新读取器也能读取 v1 驱动；v1 没有传输诊断尾部，不能解释其补零字段。
+Stage 值：0 idle、1 control open、2 interrupt open、3 mode write、4 handshake read、
+5 input read、6 close、7 retry、8 stopped。失败历史不会被成功关闭通道覆盖。
+
+首次加载发现两通道打开和模式写入均成功，但 control handshake read 返回
+`STATUS_IO_TIMEOUT (0xC00000B5)`。版本 0.2.0.2 在这个确切超时分支继续等待 interrupt
+输入，避免反复拆连接；这是一项由本机观察引入的原型处理，不是声称 Linux 已证明该行为。
+超时缓冲不会被解析，明确错误应答仍拒绝；只有真实有效的 `A1 31` 才设置 `ModeEnabled`。
+更新后观察到 `Connected=1`、Stage=5、蓝牙数据计数增加，但 `TouchPackets=0`，
+用户暂时无法操作设备，仍需通过实际触摸验证模式切换与手势。
 
 当前实现仅主动建立连接，每两秒尝试重连；没有注册全局 HID PSM server，因此设备主动
 重连与其他 HID profile 共存尚待实机验证。固定使用标准 HID PSM 和 basic L2CAP，

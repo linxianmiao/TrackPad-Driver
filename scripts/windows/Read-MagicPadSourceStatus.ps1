@@ -18,6 +18,8 @@ namespace MagicPadSourceStatus {
         public int Connected, ModeEnabled, LastStatus;
         public int Packets, TouchPackets, InvalidPackets, Reports, Reconnects;
         public uint InputMode, SurfaceEnabled, ButtonEnabled;
+        public int TransportStage, FailureStage, FailureBrbStatus, FailureBtStatus, FailureBrbType;
+        public int ControlOpens, InterruptOpens, FeatureWrites, HandshakeCode;
     }
     [StructLayout(LayoutKind.Sequential)]
     struct InterfaceData { public uint Size; public Guid ClassGuid; public uint Flags; public UIntPtr Reserved; }
@@ -63,7 +65,8 @@ namespace MagicPadSourceStatus {
                             if (!DeviceIoControl(file, (0x22u << 16) | (1u << 14) | (0x801u << 2),
                                 IntPtr.Zero, 0, out status, size, out returned, IntPtr.Zero))
                                 throw new Win32Exception(Marshal.GetLastWin32Error());
-                            if (returned != size || status.Size != size || status.Version != 1)
+                            if (returned != status.Size ||
+                                !((status.Version == 1 && returned == 52) || (status.Version == 2 && returned == size)))
                                 throw new InvalidOperationException("Unexpected source status schema");
                             results.Add(status);
                         }
@@ -77,7 +80,7 @@ namespace MagicPadSourceStatus {
 '@
 $devices = @([MagicPadSourceStatus.Reader]::Read())
 [ordered]@{
-    schema = 'magicpad-source-status/v1'
+    schema = 'magicpad-source-status/v2'
     status = $(if ($devices.Count -eq 0) { 'sourceNotPresent' } else { 'ok' })
     devices = $devices
 } | ConvertTo-Json -Depth 4
