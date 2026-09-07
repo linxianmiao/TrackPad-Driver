@@ -93,6 +93,7 @@ Test Mode。要公开分发，需要组织身份、代码签名凭据和 Microso
 
 - [驱动架构](docs/architecture.md)
 - [设备支持矩阵](docs/support-matrix.md)
+- [Windows 蓝牙实机传输检查](docs/bluetooth-transport-findings.md)
 - [Trace 文件格式](docs/trace-format.md)
 - [Windows 测试与诊断](docs/windows-testing.md)
 - [对抗性方案审查与架构更正](docs/adversarial-review.md)

@@ -23,7 +23,7 @@ const contracts = [
 ];
 
 function readRepositoryFile(relativePath) {
-  return readFileSync(join(repositoryRoot, relativePath), "utf8");
+  return readFileSync(join(repositoryRoot, relativePath), "utf8").replace(/\r\n/gu, "\n");
 }
 
 function extractDefaultCertificationBlob(source, sourceName) {
@@ -146,9 +146,20 @@ const collectorPath = "scripts/windows/Collect-MagicTrackpadDiagnostics.ps1";
 const collector = readRepositoryFile(collectorPath);
 assert.match(
   collector,
-  /\(\?:HID\|BTH\|BTHENUM\|BTHLEDEVICE\|USB\|PCI\)\[\\\\\]\{1,2\}/u,
+  /\(\?:HID\|BTH\|BTHENUM\|BTHLEDEVICE\|USB\|PCI\)\(\?<instanceSep>/u,
   `${collectorPath}: BTH instance IDs must be redacted by default`,
 );
+
+const preflightPath = "scripts/windows/Test-MagicTrackpadTransport.ps1";
+const preflight = readRepositoryFile(preflightPath);
+for (const forbiddenApi of [
+  "ReadFile", "WriteFile", "DeviceIoControl", "HidD_SetFeature",
+  "HidD_GetFeature", "HidD_GetInputReport", "HidD_SetOutputReport",
+  "HidD_FlushQueue", "HidD_GetSerialNumberString",
+]) {
+  assert.doesNotMatch(preflight, new RegExp(`\\b${forbiddenApi}\\s*\\(`, "u"),
+    `${preflightPath}: preflight must not issue report I/O or collect serials`);
+}
 
 const packageScriptPath = "scripts/windows/New-TestSignedPackage.ps1";
 const packageScript = readRepositoryFile(packageScriptPath);

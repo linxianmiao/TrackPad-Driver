@@ -4,6 +4,10 @@
 快照日期：2026-09-07；核对基线：`master@13af581`，最近实现提交为 `5f3a01d`。
 后续接手时先检查分支、工作区和提交记录；本文的“当前”只对应此快照。
 
+> 后续 Windows 实机证据见 [蓝牙传输检查](bluetooth-transport-findings.md)：
+> 已移除 Magic Utilities、确认系统驱动单指移动；但 Col01 的用户态读访问被拒绝，
+> 原始 descriptor-visible caps 没有 `0x31`。原型 A/B 的物理采集前提仍需验证。
+
 ## 1. 先读这一页
 
 - 用户目标：让自己的 **2024 USB-C Magic Trackpad，通过蓝牙连接 Windows x64**，

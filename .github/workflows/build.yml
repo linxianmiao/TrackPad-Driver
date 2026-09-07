@@ -26,10 +26,13 @@ jobs:
           cache-dependency-path: simulator/package-lock.json
 
       - name: Test shared C core
-        run: make -C core test
+        run: make -C core test all
 
       - name: Test driver source contracts
         run: node scripts/check-driver-contracts.mjs
+
+      - name: Test transport analysis and native CLI
+        run: node --test scripts/tests/*.test.mjs
 
       - name: Build simulator
         working-directory: simulator
@@ -45,6 +48,11 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v3
 
@@ -53,13 +61,37 @@ jobs:
           msbuild.exe .\tools\windows\MagicPadHidProbe\MagicPadHidProbe.vcxproj
           -p:Configuration=Release -p:Platform=x64
 
+      - name: Test diagnostic redaction
+        shell: pwsh
+        run: |
+          ./scripts/tests/diagnostic-redaction.test.ps1
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./scripts/tests/diagnostic-redaction.test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build and test native Windows core
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvars64.bat"
+          if errorlevel 1 exit /b 1
+          if not exist core\build mkdir core\build
+          cl /nologo /std:c17 /W4 /WX /O2 /Icore\include core\src\amtptp_core.c core\tests\test_core.c /Focore\build\ /Fecore\build\test-core.exe
+          if errorlevel 1 exit /b 1
+          core\build\test-core.exe
+          if errorlevel 1 exit /b 1
+          cl /nologo /std:c17 /W4 /WX /O2 /Icore\include core\src\amtptp_core.c core\tools\amtptp_cli.c /Focore\build\ /Fecore\build\amtptp-cli.exe
+          if errorlevel 1 exit /b 1
+
+      - name: Test native Windows CLI response flushing
+        run: node --test scripts/tests/native-cli.test.mjs
+
       - name: Stage read-only bring-up tools
         shell: bash
         run: |
           mkdir diagnostics
           cp tools/windows/MagicPadHidProbe/build/x64/Release/MagicPadHidProbe.exe diagnostics/
           cp scripts/windows/Collect-MagicTrackpadDiagnostics.ps1 diagnostics/
-          (cd diagnostics && sha256sum MagicPadHidProbe.exe Collect-MagicTrackpadDiagnostics.ps1 > SHA256SUMS.txt)
+          cp scripts/windows/Test-MagicTrackpadTransport.ps1 diagnostics/
+          (cd diagnostics && sha256sum MagicPadHidProbe.exe Collect-MagicTrackpadDiagnostics.ps1 Test-MagicTrackpadTransport.ps1 > SHA256SUMS.txt)
 
       - name: Upload read-only bring-up tools
         uses: actions/upload-artifact@v4

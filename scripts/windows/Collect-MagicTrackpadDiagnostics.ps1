@@ -11,6 +11,8 @@ param(
 
     [switch]$IncludeSensitiveIdentifiers,
 
+    [switch]$PresentOnly,
+
     [switch]$NoArchive
 )
 
@@ -98,10 +100,18 @@ function Protect-DiagnosticText {
         $protected,
         '(?i)[\\]{2,4}\?[\\]{1,2}(?:HID|BTH|BTHENUM|BTHLEDEVICE|USB|PCI)#[^"\r\n\s]+',
         'DEVICE_INTERFACE_REDACTED')
+    # Match consistent separators: JSON uses double backslashes. Windows
+    # PowerShell also escapes '&' as \u0026, which is not an instance separator.
     $protected = [regex]::Replace(
         $protected,
-        '(?i)(?:HID|BTH|BTHENUM|BTHLEDEVICE|USB|PCI)[\\]{1,2}[^"\r\n\\]+[\\]{1,2}[^\r\n\s"]+',
+        '(?i)(?:HID|BTH|BTHENUM|BTHLEDEVICE|USB|PCI)(?<instanceSep>[\\]{1,2})(?:\\u[0-9a-f]{4}|[^"\r\n\\])+\k<instanceSep>[^\r\n\s"]+',
         'DEVICE_INSTANCE_REDACTED')
+    # Vendor raw PDOs use a GUID enumerator and embed a Bluetooth address in
+    # their instance suffix, outside the standard bus-prefix pattern above.
+    $protected = [regex]::Replace(
+        $protected,
+        '(?i)MagicTrackpadRawPdo[\\]{1,2}[^"\r\n\s]+',
+        'MagicTrackpadRawPdo-INSTANCE_REDACTED')
     $protected = [regex]::Replace(
         $protected,
         '(?im)^(\s*Container ID\s*:\s*).+$',
@@ -290,7 +300,11 @@ $propertyKeys = @(
     "DEVPKEY_Device_ProblemStatus"
 )
 
-$allDevices = @(Get-PnpDevice -ErrorAction Stop)
+$allDevices = if ($PresentOnly) {
+    @(Get-PnpDevice -PresentOnly -ErrorAction Stop)
+} else {
+    @(Get-PnpDevice -ErrorAction Stop)
+}
 $targetDevices = @($allDevices | Where-Object {
     $_.InstanceId -match $targetPattern
 })
@@ -622,6 +636,7 @@ $manifest = [ordered]@{
     hidCapsStatus = $hidCapsStatus
     hidProbeSha256 = $hidProbeSha256
     sensitiveIdentifiersIncluded = [bool]$IncludeSensitiveIdentifiers
+    presentDevicesOnly = [bool]$PresentOnly
     traceSeconds = $TraceSeconds
     notes = @(
         "This collector does not change device state or send HID feature reports.",

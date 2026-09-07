@@ -177,7 +177,9 @@ int main(void)
 
     amtptp_default_options(&options);
     amtptp_reset_session(&session);
-    setvbuf(stdout, NULL, _IOLBF, 0);
+    /* The Windows CRT does not provide POSIX line buffering. Responses must
+     * reach the persistent bridge before the next request or EOF arrives. */
+    setvbuf(stdout, NULL, _IONBF, 0);
 
     while (fgets(line, sizeof(line), stdin) != NULL) {
         size_t raw_length = 0u;
@@ -186,7 +188,7 @@ int main(void)
 
         if (!extract_string(
                 line, "requestId", request_id, sizeof(request_id))) {
-            strcpy(request_id, "unknown");
+            memcpy(request_id, "unknown", sizeof("unknown"));
         }
 
         if (strstr(line, "\"command\":\"reset\"") != NULL) {

@@ -1,5 +1,10 @@
 # 架构
 
+> 2026-09-07 实机更新：系统驱动下 `004c:0324` 的 Col01 仅声明 8 字节鼠标输入，
+> Col02 仅声明 3 字节 `0x90`，没有声明 `0x31`；用户态 Col01 读句柄被拒绝。
+> 下文 A/B 的物理 collection 采集前提尚未通过验证，不能直接据此安装原型。
+> 实测、可重复检查和底层 transport 候选见 [蓝牙传输检查](bluetooth-transport-findings.md)。
+
 ## 生产目标：透明物理 HID + VHF 虚拟 PTP
 
 生产版本不替换 Apple 物理 collection 的 HID descriptor，也不改写其他驱动的派发表。
@@ -24,6 +29,9 @@ KMDF filter 或 function driver，`vhf.sys` 必须位于源驱动下方。依据
 [Microsoft VHF architecture](https://learn.microsoft.com/en-us/windows-hardware/drivers/hid/virtual-hid-framework--vhf-)。
 
 ## Windows 原型 A：同一设备栈
+
+本节仍为候选设计。必须先解决上述原始报告路由问题；独立 VHF child 并不会自动
+让物理 HIDClass 接收未声明的 Apple 报告。
 
 首选原型保留 `AmtPtpHidFilter.sys` 作为 `HID\...&Col01` 的透明 source filter，
 并使 `vhf.sys` 位于它下方：
