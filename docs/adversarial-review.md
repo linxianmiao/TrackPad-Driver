@@ -3,8 +3,8 @@
 ## 前两轮结论
 
 实现前两轮审查主要检查 PTP descriptor/feature/input 是否自洽、bitfield 与 packing、
-Scan Time、Contact ID 生命周期、第 6 指、休眠重连、HVCI、GPL 边界，以及 simulator
-与驱动是否共用同一转换实现。
+Scan Time、Contact ID 生命周期、第 6 指、休眠重连、HVCI、GPL 边界，以及当时的本地
+Web 模拟器与驱动是否共用同一转换实现。模拟器现已移除，共享核心和 native CLI 保留。
 
 当时根据现有代码能够拦截 HID IOCTL 并返回替换 descriptor，暂时保留了上游
 descriptor-replacement lower filter。这只能证明代码路径存在，不能证明它使用了受支持的
@@ -31,13 +31,21 @@ Windows 内核扩展点。
 - [Obtaining HID reports](https://learn.microsoft.com/en-us/windows-hardware/drivers/hid/obtaining-hid-reports)
 - [Microsoft Firefly filter sample](https://github.com/microsoft/Windows-driver-samples/tree/main/hid/firefly)
 
-## 当前结论
+## 第三轮的历史结论
 
-项目仍是“有条件推进”，但条件已收紧：
+当时项目结论是“有条件推进”，条件收紧为：
 
-1. 保留已经通过可移植测试的共享转换核心和 simulator。
+1. 保留已经通过可移植测试的共享转换核心与调试工具。
 2. 先用只读 PnP/HID caps 工具建立真实 `004c:0324` Bluetooth 基线。
 3. 完成透明 physical READ + VHF virtual PTP 原型，并删除 detour/private layout 依赖。
 4. 在原生 Windows 11 x64 上验证 filter 顺序、功能、睡眠/重连、HVCI、Driver Verifier、
    卸载和回滚。
 5. 所有门禁通过前，只能称为 bring-up 源码，不能提供可安装驱动或宣称正式支持。
+
+## 当前实现与剩余验收
+
+后续已实现专用 `AmtPtpSource` L2CAP function driver + VHF，不使用上述历史
+collection READ 方案，也不链接 legacy detour。已取得本机真实触点及基本操作、
+双/三/四指手势证据；生命周期、HVCI 和正式发布稳定性仍待验收。
+实现和当前测试包边界见 [原生 PTP source](native-ptp-source.md) 与
+[本机测试准备](source-hardware-test.md)。可移植核心与 CLI 测试继续保留，不能替代这些硬件门禁。

@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   portable-core:
-    name: Core tests and simulator
+    name: Core and tool tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -22,8 +22,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: simulator/package-lock.json
 
       - name: Test shared C core
         run: make -C core test all
@@ -33,12 +31,6 @@ jobs:
 
       - name: Test transport analysis and native CLI
         run: node --test scripts/tests/*.test.mjs
-
-      - name: Build simulator
-        working-directory: simulator
-        run: |
-          npm ci
-          npm run build
 
   diagnostics-x64:
     name: Build read-only x64 diagnostics

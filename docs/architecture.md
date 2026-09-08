@@ -10,9 +10,11 @@
 > 下文 A/B 的物理 collection 采集前提尚未通过验证，不能直接据此安装原型。
 > 实测、可重复检查和底层 transport 候选见 [蓝牙传输检查](bluetooth-transport-findings.md)。
 
-## 生产目标：透明物理 HID + VHF 虚拟 PTP
+## 历史候选：透明物理 HID + VHF 虚拟 PTP
 
-生产版本不替换 Apple 物理 collection 的 HID descriptor，也不改写其他驱动的派发表。
+本节到“生命周期”记录早期 collection 方案；当前实现使用专用 L2CAP function driver，
+详见 [原生 PTP source](native-ptp-source.md)，不应将以下方案当成当前生产路径。
+该历史方案不替换 Apple 物理 collection 的 HID descriptor，也不改写其他驱动的派发表。
 物理输入和 Windows PTP 输出是两个明确分开的数据面：
 
 ```text
@@ -87,7 +89,7 @@ transport driver 管理的其他设备。因此：
 
 ## 共享转换核心
 
-`core/` 是 simulator 和内核驱动之间的唯一转换实现：
+`core/` 是 native CLI 调试工具与使用它的内核驱动共享的转换实现：
 
 - C17，只用定宽整数和显式 little-endian 读写；
 - 不使用浮点、动态内存、CRT 状态或全局可变状态；
@@ -108,18 +110,20 @@ transport driver 管理的其他设备。因此：
 - 总输入报告固定为 50 字节，不使用打包 struct 或位域；
 - Device Certification Status Feature Report 必须完整返回 256-byte 默认 blob。
 
-## 模拟器
+## 命令行调试工具
 
-`simulator/server.mjs` 在 loopback 地址启动服务，并保持一个
-`core/build/amtptp-cli` 子进程：
+本地 Web 模拟器已移除。保留 `core/tools/amtptp_cli.c`，通过
+`make -C core all` 构建 `core/build/amtptp-cli`：
 
 ```text
-React controls → encoded Apple 0x31 bytes → native C CLI
-                                      ↘ decoded model + PTP bytes → UI
+JSON-lines stdin（Apple 0x31 hex）→ native C CLI → 共享 core
+                                           → JSON-lines stdout（decoded + PTP bytes）
 ```
 
-预设和 trace seek 会先重置 native session，然后从第 0 帧重放到目标帧，因此 Contact ID
-生命周期与顺序播放一致。
+一个 CLI 进程持有一个 session；复现连续触点问题时先 reset，再按原始顺序提交每帧。
+[Trace 格式](trace-format.md) 继续作为 fixture 格式保留，CLI 不直接解析整份 trace；
+调用方需提取各帧 `rawReportHex` 并显式比较期望输出。CLI 和合成测试不能替代 Windows
+实机上的枚举、手势、蓝牙连接或生命周期验收。
 
 ## 明确不做
 

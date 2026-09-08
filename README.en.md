@@ -183,13 +183,9 @@ node scripts/check-driver-contracts.mjs
 node --test scripts/tests/*.test.mjs
 ```
 
-Optional local simulator: run `npm ci` and `npm run dev` in the `simulator` directory, then open [localhost:4173](http://127.0.0.1:4173). The simulator and CI cannot replace Windows hardware validation.
+`core/build/amtptp-cli` remains available for command-line protocol debugging. Core/tool tests and CI cannot replace Windows hardware validation.
 
 - [Native driver implementation and limitations](docs/native-ptp-source.md)
 - [Local hardware test records and recovery details](docs/source-hardware-test.md)
 - [Battery queries and Windows display](docs/battery-display.md)
 - [AI handoff guide](docs/ai-handoff.md) (contains historical snapshots; prioritize the new source driver documentation and actual code)
-
-## Source and license
-
-The project is based on [vitoplantamura/MagicTrackpad2ForWindows@68b31c4](https://github.com/vitoplantamura/MagicTrackpad2ForWindows/commit/68b31c466f4e2ec8905cf7be44580b01705650f3), which derives from [imbushuo/mac-precision-touchpad](https://github.com/imbushuo/mac-precision-touchpad). Retained derivative code remains subject to [GPLv2](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html); reorganizing Git history does not change code provenance or license terms. This project has not copied or reverse-engineered Magic Utilities' proprietary implementation.

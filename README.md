@@ -183,13 +183,9 @@ node scripts/check-driver-contracts.mjs
 node --test scripts/tests/*.test.mjs
 ```
 
-可选本地模拟器：在 `simulator` 目录运行 `npm ci`、`npm run dev`，打开 [localhost:4173](http://127.0.0.1:4173)。模拟器和 CI 不能替代 Windows 实机验收。
+保留 `core/build/amtptp-cli` 用于命令行协议调试。核心/工具测试和 CI 不能替代 Windows 实机验收。
 
 - [原生驱动实现与限制](docs/native-ptp-source.md)
 - [本机测试记录与恢复细节](docs/source-hardware-test.md)
 - [电量查询与系统显示](docs/battery-display.md)
 - [AI 接手手册](docs/ai-handoff.md)（含历史快照，阅读时以新 source 文档和实际代码为准）
-
-## 来源与许可证
-
-项目以 [vitoplantamura/MagicTrackpad2ForWindows@68b31c4](https://github.com/vitoplantamura/MagicTrackpad2ForWindows/commit/68b31c466f4e2ec8905cf7be44580b01705650f3) 为基础，后者源自 [imbushuo/mac-precision-touchpad](https://github.com/imbushuo/mac-precision-touchpad)。保留的派生代码仍受 [GPLv2](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html) 约束；整理 Git 历史不改变代码来源或许可条件。本项目未复制或逆向 Magic Utilities 的专有实现。
