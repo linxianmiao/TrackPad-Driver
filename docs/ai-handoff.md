@@ -10,10 +10,12 @@
 > 电量，0.2.0.6 通过设备属性直接发布给 Windows；状态接口 v5 可诊断发布结果。
 > 本机已收到 100% 并验证多轮主动查询，用户确认系统蓝牙列表显示 100%。
 > 不再使用独立弹窗/托盘。充电状态字节尚未解释；生命周期稳定性仍须验收。
-> 下文的“VHF 尚未实现”
-> 描述的是历史 legacy 工程快照，不能再用来概括整个仓库。新原型改变 HidBth 的持有关系。
-快照日期：2026-09-07；核对基线：`master@13af581`，最近实现提交为 `5f3a01d`。
-后续接手时先检查分支、工作区和提交记录；本文的“当前”只对应此快照。
+> 本地 Web 模拟器已移除；保留共享 C 核心、`amtptp-cli` 和自动化测试。
+> 下文标为 legacy / 历史的架构和待办仅供旧工程对照，不能再用来概括整个仓库。
+> 新原型改变 HidBth 的持有关系，当前实现及实机证据以本节链接的文档为准。
+
+原始 legacy 快照日期：2026-09-07；当时基线为 `master@13af581`，实现提交为 `5f3a01d`。
+后续接手时先检查分支、工作区和提交记录，不把历史快照当成最新状态。
 
 > 后续 Windows 实机证据见 [蓝牙传输检查](bluetooth-transport-findings.md)：
 > 已移除 Magic Utilities、确认系统驱动单指移动；但 Col01 的用户态读访问被拒绝，
@@ -28,24 +30,25 @@
 - 主目标为 Bluetooth `VID 004c / PID 0324`；同设备 USB 路径是 `05ac:0324`，不能混为一条链路。
 - 继续在本仓库开发，参考开源方案，不另起一个 Magic Utilities 克隆项目。
   不从用户曾提供的 Magic Utilities EXE 复制专有代码、资源或授权逻辑。
-- 目前已有共享 C 核心、模拟器、只读诊断工具和 legacy 驱动编译验证；
-  **VHF 迁移尚未实现，2024 USB-C 蓝牙兼容性尚未经过实机验证。**
-- 当前只允许编译和只读诊断，不生成、签名或安装驱动包。
-  具体暂停条件见 [Windows 测试指南](windows-testing.md)。
+- 目前保留共享 C 核心、命令行调试工具、只读诊断工具和 legacy 驱动编译验证；
+  新 `AmtPtpSource` 已实现专用 L2CAP + VHF，本机基本功能与双/三/四指手势已验证，
+  生命周期及发布稳定性仍待验收。
+- legacy 驱动仍禁止打包；新 source 的隔离测试流程见
+  [本机测试准备](source-hardware-test.md)，不得把测试签名包当成正式发行包。
 - Git 规则：改动必须走独立分支和 PR 合并，禁止直接向 `main` / `master` 推送改动。
 
 ### 已实现、未实现、未验证
 
 | 范围 | 源码现状 | 不应据此声称 |
 | --- | --- | --- |
-| `core` | 裸 `0x31` 解码、稳定五指准入、PTP 转换和固定 50 字节序列化 | 真实 `0324` 蓝牙帧已验证 |
-| KMDF Bluetooth | 链接 core；有生命周期防护；仍使用 detour 和旧 HID IOCTL 链路 | 已采用受支持的 VHF 架构 |
+| `core` | 裸 `0x31` 解码、稳定五指准入、PTP 转换和固定 50 字节序列化 | 仅凭合成测试即可证明所有真实设备输入兼容 |
+| Legacy KMDF Bluetooth | 链接 core；有生命周期防护；仍使用 detour 和旧 HID IOCTL 链路 | 该旧工程已采用受支持的 VHF 架构 |
 | USB UMDF | 保留上游独立解析/转换路径，含 `0324` ID | USB 已接入共享 core，或 USB 成功即证明蓝牙成功 |
-| VHF | 架构、迁移要求和打包阻断已写入文档/脚本 | `VhfCreate` / `VhfReadReportSubmit` 已落地 |
-| Simulator | 本地 HTTP 服务调用真实 native core；支持合成输入和 trace 重放 | 仿真通过即 Windows 能枚举 PTP |
+| `AmtPtpSource` / VHF | 专用 L2CAP function driver 和 VHF 已实现，本机基本手势已验证 | 生命周期、其他机器或正式发行签名已验证 |
+| Native CLI | JSON-lines 标准输入/输出调用共享 core；保留 session 与 reset | 可移植测试通过即 Windows 能枚举 PTP |
 | 只读诊断 | 枚举 PnP、descriptor-visible HID caps、系统和事件 | 已采到原始 `0x31` 坐标报告或验证设备模式切换 |
-| 电量 | 旧控制 IOCTL 主动获取 `0x90` 并读取 byte 2；连续输入路径丢弃 `0x90` | 电量/充电已在新架构打通或经 `0324` 验证 |
-| 安装/发布 | PowerShell 打包入口无条件阻断；CI 不上传驱动安装包 | Release 编译、HQA blob 或诊断 artifact 等于正式签名驱动 |
+| Legacy 电量 | 旧控制 IOCTL 主动获取 `0x90` 并读取 byte 2；连续输入路径丢弃 `0x90` | 旧入口可代表新 source 的电量实现；新实现证据见本文开头 |
+| 安装/发布 | legacy 打包入口无条件阻断；新 source 有本机测试签名流程；CI 不上传驱动安装包 | Release 编译、HQA blob 或诊断 artifact 等于正式签名驱动 |
 
 ## 2. 推荐阅读顺序和代码地图
 
@@ -72,14 +75,16 @@
 | [Detour.c](../AmtPtpHidFilter/Detour.c)、[Hac.h](../AmtPtpHidFilter/include/Hac.h) | 待移除的共享派发表改写和私有 HIDClass 布局依赖 |
 | [AmtPtpDeviceUsbUm](../AmtPtpDeviceUsbUm) | 旧 USB UMDF；`InputInterrupt.c` 的 Type5 分支自行解析 MT2 位域 |
 | [AmtPtpControlPanel](../AmtPtpControlPanel) | 旧 WinForms 设置界面，通过注册表/控制 IOCTL 配置；不是当前开发重点 |
-| [simulator/server.mjs](../simulator/server.mjs) | HTTP → 串行操作队列 → 单个 native CLI 子进程 |
-| [simulator/src](../simulator/src) | `App.tsx` 界面/时间线，`codec.ts` 合成 Apple 输入，`api.ts` 调服务 |
+| [AmtPtpSource](../AmtPtpSource) | 新 Bluetooth L2CAP + VHF source；独立于 legacy filter |
 | [MagicPadHidProbe.cpp](../tools/windows/MagicPadHidProbe/MagicPadHidProbe.cpp) | x64 只读 SetupAPI/HidP caps 探针；不做 report IO |
 | [build](../build) | **受版本控制的 INF 和历史构建脚本目录，不是可整目录删除的临时产物** |
 
-## 3. 当前数据链和目标数据链不能混写
+## 3. Legacy 数据链和历史迁移设计
 
-### 当前 KMDF 实现
+当前 source 数据链见 [原生 PTP source](native-ptp-source.md)。以下仅描述保留的旧工程
+和早期 collection 原型，不是新 `AmtPtpSource` 的工作路径。
+
+### Legacy KMDF 实现
 
 `DriverEntry` → `PtpFilterEvtDeviceAdd` → `PtpFilterCreateDevice` 创建 filter。
 `PtpFilterSelfManagedIoInit` 仍调用 detour：读取私有 HIDClass 布局，修改底层共享
@@ -99,7 +104,7 @@
 取消/等待、同步请求超时和返回状态检查。这些是 **旧传输上的防护**，不是 VHF 实现，
 也不使全局派发表改写成为可发布方案。
 
-### 待实现 VHF 架构
+### 历史 VHF collection 原型候选
 
 ```text
 物理 Apple HID collection（保持原 descriptor）
@@ -110,7 +115,8 @@
 ```
 
 计划新增 `AmtPtpHidFilter/VhfDevice.c/.h`、`PhysicalHid.c/.h`、`PtpReports.c/.h`，
-链接 `VhfKm.lib`；这些文件/API 在当前驱动中尚不存在。
+链接 `VhfKm.lib`；此旧工程迁移方案没有落地。实际的新 VHF 实现位于
+`AmtPtpSource/Vhf.c`，不是这些历史候选文件。
 
 先验证同栈原型 A：physical source filter 在 `vhf.sys` 上方，专用 INF 明确顺序。
 如果同一 Col01 栈无法可靠工作，转为原型 B：透明物理 filter + 独立 root/software
@@ -167,11 +173,11 @@ amtptp_serialize_ptp(&frame, output, capacity, &output_length);
 
 ### 相同 core 不等于相同默认行为
 
-Simulator CLI 固定使用 `amtptp_default_options`，没有 options 配置 API；
-KMDF 在 `Input.c` 从 `PtpFilterReadSettings` 读到的注册表设置组装 options。
+Native CLI 固定使用 `amtptp_default_options`，没有 options 配置 API；
+legacy KMDF 在 `Input.c` 从 `PtpFilterReadSettings` 读到的注册表设置组装 options。
 以下是无注册表覆盖时的差异：
 
-| 选项 | Core / Simulator 默认 | KMDF 设置默认 |
+| 选项 | Core / CLI 默认 | Legacy KMDF 设置默认 |
 | --- | --- | --- |
 | `stop_pressure` | `0xffffffff` | `0` |
 | `ignore_button_finger` | `0` | `1` |
@@ -182,7 +188,7 @@ KMDF 在 `Input.c` 从 `PtpFilterReadSettings` 读到的注册表设置组装 op
 selective reporting 状态（或保持两者均开启）。USB UMDF 尚未使用这个 core，不能将该保证
 扩展到 USB 旧路径。
 
-## 5. Simulator 与 trace 的用途
+## 5. 命令行调试与 trace 的用途
 
 在仓库根目录执行；需要系统 C 编译器、make、Node.js 22：
 
@@ -190,22 +196,13 @@ selective reporting 状态（或保持两者均开启）。USB UMDF 尚未使用
 make -C core clean
 make -C core test all
 node scripts/check-driver-contracts.mjs
-npm ci --prefix simulator
-npm run build --prefix simulator
+node --test scripts/tests/*.test.mjs
 ```
 
-`core/Makefile` 当前未显式声明头文件依赖；修改头文件后先 clean，避免沿用旧二进制。
-不要并行执行 clean 与 test/all。
+不要并行执行 clean 与 test/all。本地 Web 服务、前端和对应 npm 依赖已移除，
+以下 CLI 直接调用共享核心，不需要浏览器或 HTTP 服务。
 
-```bash
-npm run dev --prefix simulator
-```
-
-默认 [http://127.0.0.1:4173](http://127.0.0.1:4173)。生产模式先 build，再
-`npm run start --prefix simulator`；可用 `MAGICPAD_SIMULATOR_HOST` / `MAGICPAD_SIMULATOR_PORT`
-修改监听地址/端口，日常保持 loopback。
-
-无需 UI 的 CLI 冒烟测试：
+CLI 冒烟测试：
 
 ```bash
 printf '%s\n' '{"requestId":"reset","command":"reset"}' '{"requestId":"empty","reportHex":"31000000"}' | ./core/build/amtptp-cli
@@ -214,16 +211,12 @@ printf '%s\n' '{"requestId":"reset","command":"reset"}' '{"requestId":"empty","r
 CLI 返回 JSON decoded、PTP 字段及 `ptpReportHex`。它是简单 JSON-lines 适配器，不是通用 JSON
 解析库；reset 使用示例中的紧凑 `"command":"reset"` 形式。
 
-HTTP 入口为 `GET /api/health`、`POST /api/convert`、`POST /api/reset`、`POST /api/replay`。
-replay 接收 `reportHexes` 数组，1–512 帧，reset + 重放在队列中作为一个操作串行完成。
-目前服务只有一个全局 CLI/session，多个浏览器标签页会影响同一状态，没有按客户端隔离。
-
 [Trace 格式](trace-format.md) 是 `magicpad-trace/v1` JSON，不是 Windows ETL：
-导入后重新运行 `rawReportHex`，可选 `ptpReportHex` 不作为可信输出，当前导入流程也不会
-自动断言与它逐字节相等。UI 导出目前总标记 `source/transport: synthetic`，因此导入实机
-trace 后重新导出会丢失真实来源标记，保存 fixture 时必须保留原始来源证据。
+格式说明继续保留，但 CLI 不直接导入整份 trace。复现时先 reset，再按帧序将每个
+`rawReportHex` 作为 CLI 的 `reportHex` 提交。可选 `ptpReportHex` 只作为期望值，
+需要调用方显式比较；保存 fixture 时保留原始来源证据。
 
-预设和核心测试是合成数据；当前未见已提交的 `0324` 蓝牙真实输入 fixture。
+核心测试使用合成数据；当前未见已提交的 `0324` 蓝牙真实输入 fixture。
 新增 fixture 应附型号、transport、采集条件、最小原始帧和期望结果，去掉可识别信息，
 只在测试者明确同意后保留必要坐标，不上传长时间操作轨迹。
 
@@ -303,11 +296,12 @@ tools/windows/MagicPadHidProbe/build/x64/Release/MagicPadHidProbe.exe
 - 旧 WDK 项目构建可能有内部测试签名步骤；CI 的“no package output”表示不交付安装包，
   不能推断所有本地构建过程完全不涉及签名。
 
-[当前 CI](../.github/workflows/build.yml) 有三个 job：
+[当前 CI](../.github/workflows/build.yml) 有四个 job：
 
-1. `portable-core`：C 核心测试、源码合约、Node 22 simulator build。
+1. `portable-core`：C 核心/source 测试、源码合约、Node 22 工具和 CLI 测试。
 2. `diagnostics-x64`：等待 portable job，构建并上传只读诊断 artifact。
-3. `legacy-compile`：USB/KMDF 的 x64、ARM64 和旧控制面板 AnyCPU 编译；上传源码 tar。
+3. `native-source-x64`：编译新的 Bluetooth VHF source，运行代码分析，不签名或打包。
+4. `legacy-compile`：USB/KMDF 的 x64、ARM64 和旧控制面板 AnyCPU 编译；上传源码 tar。
 
 触发器为 pull request、`feature/**` push 和手动 dispatch。仅推送 `codex/**` 不触发 CI，
 创建 PR 才触发；当前也没有 `master` push 触发。PR 源码包的 SHA 可能是 GitHub 合成 merge commit。
@@ -316,16 +310,13 @@ tools/windows/MagicPadHidProbe/build/x64/Release/MagicPadHidProbe.exe
 源码合约检查主要是静态模式断言，包括 HQA 完整性、Feature 长度、探针禁用 report IO、
 超时/状态处理和打包隔离。两者均不能证明 Windows 枚举、VHF、竞态、电源、HVCI 或蓝牙实机通过。
 
-本次文档交接的本地验证：`make -C core clean` 后 `test all`、源码合约检查、simulator
-`npm ci` / build、CLI reset/空帧冒烟和文档本地链接检查均通过。
-`npm audit --prefix simulator --json` 另报告一项现有间接依赖 `nanoid` 的 high 告警
-（[GHSA-2v37-7h3g-55p8](https://github.com/advisories/GHSA-2v37-7h3g-55p8)，报告影响范围 `<3.3.18`）。
-这不是新增文档导致的问题；本次未升级依赖，后续应单独评估调用可达性、升级并回归。
-审计快照不保证后续仍相同，接手时重跑；构建通过不能表述为依赖审计无告警。
+本地验证入口见第 5 节；每次交接应重新运行并记录结果。旧 Web 模拟器的构建和 npm
+依赖审计已不属于当前检查范围，移除它们不代表 Windows 驱动安全或稳定性已通过验收。
 
-## 8. 当前坑点和安全边界
+## 8. Legacy 工程坑点和安全边界
 
-这些是交接发现，本文不修改对应实现：
+这些是旧工程交接发现，本文不修改对应实现；新 source 的状态、输入模式、电量和
+生命周期限制以 [原生 PTP source](native-ptp-source.md) 为准：
 
 - `PtpInputOn` 在 `Hid.c` 的 input-mode Feature 中被赋值并 reset session，但当前全仓没有
   读取它来控制输入输出；不能声称 mouse/PTP mode 切换已生效。selective touch/button flags
@@ -346,9 +337,13 @@ tools/windows/MagicPadHidProbe/build/x64/Release/MagicPadHidProbe.exe
   [支持矩阵](support-matrix.md) 中“确认后可给 Col02 绑定 Null Device”的旧表述不能解除
   [Windows 测试指南](windows-testing.md)的专用 INF / 移除 NullDevice 门禁。
 - 不把 VM 暂停当成 guest S3/Modern Standby；原生 x64 kernel、蓝牙直通/真实设备栈和目标测试
-  条件缺一不可。macOS 模拟器或 Windows ARM64 编译不能替代目标实机验收。
+  条件缺一不可。macOS 上的可移植测试或 Windows ARM64 编译不能替代目标实机验收。
 
-## 9. 下一阶段按这个顺序推进
+## 9. 历史原型阶段待办（不能作为当前进度）
+
+以下为 collection 原型阶段的原始顺序。专用 L2CAP + VHF source 已实现并取得本机
+基本手势证据；不要重复将“实现最小 VHF 原型”列为尚未开始。当前剩余验收见
+[本机测试准备](source-hardware-test.md) 和 [原生 PTP source](native-ptp-source.md)。
 
 1. **取得只读基线。** 请用户提供已检查隐私的 Windows x64 蓝牙诊断 zip；明确 Col01/Col02、
    report lengths、stack、蓝牙驱动、OS build/HVCI。缺失字段记录为未知，不猜 collection 用途。
@@ -371,7 +366,7 @@ tools/windows/MagicPadHidProbe/build/x64/Release/MagicPadHidProbe.exe
 ## 10. 来源、Git 和接手提示词
 
 仓库：[linxianmiao/TrackPad-Driver](https://github.com/linxianmiao/TrackPad-Driver)，默认分支 `master`。
-来源链以 [README](../README.md#来源与许可证) 为准：固定基于
+历史来源链：固定基于
 [`vitoplantamura/MagicTrackpad2ForWindows@68b31c4`](https://github.com/vitoplantamura/MagicTrackpad2ForWindows/commit/68b31c466f4e2ec8905cf7be44580b01705650f3)，
 后者源自 [imbushuo/mac-precision-touchpad](https://github.com/imbushuo/mac-precision-touchpad)，
 继承 [GPLv2](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html)。不能描述为全部从零自研，也不能将参考项目支持范围当成本仓库验证结果。
@@ -399,12 +394,13 @@ git log -5 --oneline
 README、架构、Windows 测试指南与实际源码。目标是 Windows x64 + 2024 USB-C
 Magic Trackpad 的蓝牙 004c:0324，界面暂不优先，沿用本仓库并参考开源实现。
 
-先汇报已实现、仅设计、缺实机验证三类状态，尤其不要把文档里的 VHF 写成已经实现。
-目前 core/模拟器/只读诊断可用，但 Bluetooth 仍有 legacy detour，USB 未接共享 core。
-请核对 input-mode flag、默认 options 差异、电量旧入口与连续流丢弃的区别。
+先汇报已实现、仅设计、缺实机验证三类状态。AmtPtpSource 已实现专用 L2CAP + VHF，
+本机基本操作与双/三/四指手势已验证；生命周期和发布稳定性仍待验收。
+core、amtptp-cli 和只读诊断工具保留，本地 Web 模拟器已移除。
+legacy Bluetooth detour 工程保持隔离，不要与新 source 混为同一数据链。
 
-下一步优先分析用户提供的脱敏只读诊断包；若没有，列明需要的实机字段和获取方式。
-实现任务另行确认范围，按架构门禁推进透明 physical read + VHF，不安装当前 legacy 包，
+下一步优先核对 native-ptp-source、source-hardware-test 和 battery-display 中的实机证据。
+实现任务另行确认范围，按新 source 的架构和硬件门禁推进，不安装当前 legacy 包，
 不删除打包 throw 绕过限制，不默认关闭 HVCI，不把合成测试当作硬件证据。
 涉及安装、签名或新采集方式时先说明风险、隔离和回滚方案，取得所需授权。
 

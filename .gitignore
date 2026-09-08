@@ -10,13 +10,6 @@ build/result/
 /diagnostics/
 /packages
 core/build/
-simulator/node_modules/
-simulator/dist/
-simulator/playwright-report/
-simulator/test-results/
-simulator/*.tsbuildinfo
-simulator/vite.config.js
-simulator/vite.config.d.ts
 magicpad-diagnostics-*/
 magicpad-diagnostics-*.zip
 magicpad-*.etl
