@@ -4,8 +4,11 @@
 旧 `New-TestSignedPackage.ps1`、Detour/private-layout 工程保持隔离。
 测试包不会上传 GitHub；CI 仍只编译 unsigned source。原型已加载，基本指针和双/三/四指手势已实测。
 
-2026-09-08 运行状态：Secure Boot 已关闭，当前内核 TESTSIGN 位已确认，C、D 盘的
-BitLocker 保护均为开启。已安装的当前版本为 0.2.0.2，专用 source 和 VHF 子设备
+以下为 2026-09-08 的 0.2.0.2 手势验收快照；当前源码版本已更新到 0.2.0.6，
+后续触控和电量显示复验见[电量显示](battery-display.md)。完整生命周期验收仍未完成。
+
+该轮运行状态：Secure Boot 已关闭，当前内核 TESTSIGN 位已确认，C、D 盘的
+BitLocker 保护均为开启。当时安装的版本为 0.2.0.2，专用 source 和 VHF 子设备
 状态正常，`InputMode=3`。两条蓝牙通道和模式命令写入成功，设备应答缺失；现允许在
 该超时之后等待真实 interrupt 触点数据。实际触摸后已确认 `A1 31` 到 PTP 的路径，
 `ModeEnabled=1`、`InputMode=3`、`LastStatus=0`。在用户反馈时读取到
