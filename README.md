@@ -121,4 +121,4 @@ Test Mode。要公开分发，需要组织身份、代码签名凭据和 Microso
 后者源自 `imbushuo/mac-precision-touchpad`。本项目不会复制或逆向 Magic Utilities 的
 专有实现，只实现公开 HID/PTP 行为和独立转换逻辑。
 
-项目继承并遵循 [GPLv2](LICENSE)。
+项目继承并遵循 [GPLv2](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html)。

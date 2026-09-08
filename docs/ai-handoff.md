@@ -374,7 +374,7 @@ tools/windows/MagicPadHidProbe/build/x64/Release/MagicPadHidProbe.exe
 来源链以 [README](../README.md#来源与许可证) 为准：固定基于
 [`vitoplantamura/MagicTrackpad2ForWindows@68b31c4`](https://github.com/vitoplantamura/MagicTrackpad2ForWindows/commit/68b31c466f4e2ec8905cf7be44580b01705650f3)，
 后者源自 [imbushuo/mac-precision-touchpad](https://github.com/imbushuo/mac-precision-touchpad)，
-继承 [GPLv2](../LICENSE)。不能描述为全部从零自研，也不能将参考项目支持范围当成本仓库验证结果。
+继承 [GPLv2](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html)。不能描述为全部从零自研，也不能将参考项目支持范围当成本仓库验证结果。
 公开协议参考与固定 Linux 源码链接见 [设备支持矩阵](support-matrix.md)。
 
 历史定位点：`5f3a01d` 修复 core 的 kernel CRT 边界；`13af581` 是此前 PR #1 的 merge commit。
