@@ -1,0 +1,177 @@
+name: Validate native PTP driver
+
+on:
+  pull_request:
+  push:
+    branches:
+      - "feature/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  portable-core:
+    name: Core tests and simulator
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: simulator/package-lock.json
+
+      - name: Test shared C core
+        run: make -C core test all
+
+      - name: Test driver source contracts
+        run: node scripts/check-driver-contracts.mjs
+
+      - name: Test transport analysis and native CLI
+        run: node --test scripts/tests/*.test.mjs
+
+      - name: Build simulator
+        working-directory: simulator
+        run: |
+          npm ci
+          npm run build
+
+  diagnostics-x64:
+    name: Build read-only x64 diagnostics
+    needs: portable-core
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v3
+
+      - name: Build read-only HID capability probe
+        run: >-
+          msbuild.exe .\tools\windows\MagicPadHidProbe\MagicPadHidProbe.vcxproj
+          -p:Configuration=Release -p:Platform=x64
+
+      - name: Test diagnostic redaction
+        shell: pwsh
+        run: |
+          ./scripts/tests/diagnostic-redaction.test.ps1
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./scripts/tests/diagnostic-redaction.test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build and test native Windows core
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvars64.bat"
+          if errorlevel 1 exit /b 1
+          if not exist core\build mkdir core\build
+          cl /nologo /std:c17 /W4 /WX /O2 /Icore\include core\src\amtptp_core.c core\tests\test_core.c /Focore\build\ /Fecore\build\test-core.exe
+          if errorlevel 1 exit /b 1
+          core\build\test-core.exe
+          if errorlevel 1 exit /b 1
+          cl /nologo /std:c17 /W4 /WX /O2 /Icore\include core\src\amtptp_core.c core\src\amtptp_source.c core\tests\test_source.c /Focore\build\ /Fecore\build\test-source.exe
+          if errorlevel 1 exit /b 1
+          core\build\test-source.exe
+          if errorlevel 1 exit /b 1
+          cl /nologo /std:c17 /W4 /WX /O2 /Icore\include core\src\amtptp_core.c core\tools\amtptp_cli.c /Focore\build\ /Fecore\build\amtptp-cli.exe
+          if errorlevel 1 exit /b 1
+
+      - name: Test native Windows CLI response flushing
+        run: node --test scripts/tests/native-cli.test.mjs
+
+      - name: Validate source status reader without a driver
+        shell: pwsh
+        run: |
+          ./scripts/windows/Read-MagicPadSourceStatus.ps1
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./scripts/windows/Read-MagicPadSourceStatus.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Stage read-only bring-up tools
+        shell: bash
+        run: |
+          mkdir diagnostics
+          cp tools/windows/MagicPadHidProbe/build/x64/Release/MagicPadHidProbe.exe diagnostics/
+          cp scripts/windows/Collect-MagicTrackpadDiagnostics.ps1 diagnostics/
+          cp scripts/windows/Test-MagicTrackpadTransport.ps1 diagnostics/
+          cp scripts/windows/Read-MagicPadSourceStatus.ps1 diagnostics/
+          cp tools/windows/MagicPadSourceStatus/SourceStatus.cs diagnostics/
+          (cd diagnostics && sha256sum MagicPadHidProbe.exe Collect-MagicTrackpadDiagnostics.ps1 Test-MagicTrackpadTransport.ps1 Read-MagicPadSourceStatus.ps1 SourceStatus.cs > SHA256SUMS.txt)
+
+      - name: Upload read-only bring-up tools
+        uses: actions/upload-artifact@v4
+        with:
+          name: magicpad-x64-read-only-diagnostics
+          path: diagnostics/
+
+  native-source-x64:
+    name: Compile new Bluetooth VHF source (unsigned)
+    needs: portable-core
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: microsoft/setup-msbuild@v3
+        with:
+          vs-version: '[17.0,18.0)'
+      - name: Restore source driver build dependencies
+        run: nuget restore ./AmtPtpSource/AmtPtpSource.vcxproj -PackagesDirectory ./packages
+      - name: Compile source driver without signing or packaging
+        run: msbuild.exe ./AmtPtpSource/AmtPtpSource.vcxproj -p:Configuration=Release -p:Platform=x64 -p:SignMode=Off -p:RunCodeAnalysis=true
+
+  legacy-compile:
+    name: Compile quarantined legacy sources
+    runs-on: windows-2022
+    steps:
+
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        #with:
+        #  repository: vitoplantamura/MagicTrackpad2ForWindows
+        #  ref: master
+
+      - name: Create Source Tarball
+        shell: bash
+        id: create_tarball
+        run: |
+          COMMIT_SHA=$(git rev-parse HEAD)
+          echo "commit_sha=${COMMIT_SHA}" >> "$GITHUB_OUTPUT"
+          mkdir .tarball
+          tar -czf .tarball/source-${COMMIT_SHA}.tar.gz --exclude='.git' --exclude='.tarball' .
+
+      - name: Upload Source Tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: source-code-${{ steps.create_tarball.outputs.commit_sha }}
+          path: .tarball/source-${{ steps.create_tarball.outputs.commit_sha }}.tar.gz
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v3
+        with:
+          # The NuGet WDK currently ships DriverKit tasks for MSBuild 17.
+          # MSBuild 18 looks for a non-existent *.18.0.dll and fails before
+          # compiling any source, so keep this quarantined compile on VS 2022.
+          vs-version: '[17.0,18.0)'
+
+      - name: Restore NuGet Packages
+        run: |
+          nuget restore ./AmtPtpDeviceUsbUm/MagicTrackpad2PtpDevice.vcxproj -PackagesDirectory ${{ github.workspace }}\packages
+          nuget restore ./AmtPtpHidFilter/AmtPtpHidFilter.vcxproj -PackagesDirectory ${{ github.workspace }}\packages
+          
+      - name: Compile legacy drivers (no package output)
+        shell: bash
+        run: |
+          sed -i 's|</TimeStampServer>|</TimeStampServer><ApiValidator_Enable>false</ApiValidator_Enable>|g' ./AmtPtpDeviceUsbUm/MagicTrackpad2PtpDevice.vcxproj
+          sed -i 's|</TimeStampServer>|</TimeStampServer><ApiValidator_Enable>false</ApiValidator_Enable>|g' ./AmtPtpHidFilter/AmtPtpHidFilter.vcxproj
+          msbuild.exe ./AmtPtpDeviceUsbUm/MagicTrackpad2PtpDevice.vcxproj -p:Configuration=Release -p:Platform=x64
+          msbuild.exe ./AmtPtpHidFilter/AmtPtpHidFilter.vcxproj -p:Configuration=Release -p:Platform=x64
+          msbuild.exe ./AmtPtpDeviceUsbUm/MagicTrackpad2PtpDevice.vcxproj -p:Configuration=Release -p:Platform=ARM64
+          msbuild.exe ./AmtPtpHidFilter/AmtPtpHidFilter.vcxproj -p:Configuration=Release -p:Platform=ARM64
+          msbuild.exe ./AmtPtpControlPanel/AmtPtpControlPanel.csproj -p:Configuration=Release -p:Platform=AnyCPU
